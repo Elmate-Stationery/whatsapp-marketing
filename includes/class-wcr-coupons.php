@@ -125,7 +125,7 @@ class WCR_Coupons {
             $coupon->set_individual_use( $config['individual'] );
             $coupon->set_date_expires( $expires->getTimestamp() );
             if ( $config['restrict_email'] && is_email( $c->email ) ) $coupon->set_email_restrictions( array( $c->email ) );
-            $coupon->set_description( sprintf( 'WhatsApp reminder voucher for %s. Created by WhatsApp Customer Retention.', $c->name ? $c->name : 'customer #' . (int) $c->id ) );
+            $coupon->set_description( sprintf( 'WhatsApp reminder voucher for %s. Created by WhatsApp Marketing.', $c->name ? $c->name : 'customer #' . (int) $c->id ) );
             $coupon->update_meta_data( self::META, $id );
             $wc_id = $coupon->save();
         } catch ( Exception $e ) {

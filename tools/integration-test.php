@@ -211,7 +211,7 @@ $errors = array();
 set_error_handler( function ( $no, $str, $file, $line ) use ( &$errors ) { $errors[] = "$str ($file:$line)"; return true; } );
 foreach ( array( array(), array( 'view' => 'all', 'orderby' => 'aov', 'order' => 'asc' ), array( 'tab' => 'conversions' ), array( 'tab' => 'vouchers' ),
     array( 'tab' => 'settings' ), array( 'tab' => 'settings', 'section' => 'messages' ), array( 'tab' => 'settings', 'section' => 'voucher' ), array( 'tab' => 'settings', 'section' => 'data' ) ) as $get ) {
-    $_GET = $get + array( 'page' => 'wcr-customers' );
+    $_GET = $get + array( 'page' => 'whatsapp-marketing' );
     ob_start(); WCR_Admin::page(); $html = ob_get_clean();
     check( 'render ' . ( $get ? http_build_query( $get ) : 'customers' ), strlen( $html ) > 500, true );
 }

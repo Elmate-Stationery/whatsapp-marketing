@@ -1,4 +1,4 @@
-=== WooCommerce WhatsApp Customer Retention ===
+=== WhatsApp Marketing ===
 Requires at least: 6.4
 Requires PHP: 7.4
 WC requires at least: 7.2
@@ -8,7 +8,7 @@ Find customers who have not ordered again for a while and remind them on WhatsAp
 
 == Description ==
 
-WooCommerce → WhatsApp Customers lists every customer with a counted order (default: Completed), with order count,
+Marketing → WhatsApp Marketing lists every customer with a counted order (default: Completed), with order count,
 total value (net of refunds), AOV, last order and days since it.
 
 Workflow: a customer's last counted order passes the reminder period (default 30 days) and they have no open order

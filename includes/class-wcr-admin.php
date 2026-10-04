@@ -1,9 +1,9 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-// WooCommerce → WhatsApp Customers: Customers (dashboard + list), Conversions, Vouchers and Settings tabs.
+// Marketing → WhatsApp Marketing: Customers (dashboard + list), Conversions, Vouchers and Settings tabs.
 class WCR_Admin {
-    const PAGE = 'wcr-customers';
+    const PAGE = 'whatsapp-marketing';
     const PER_PAGE = 25;
     const WA_ICON = '<svg class="wcr-wa-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2.05 22l5.25-1.38c1.45.79 3.08 1.21 4.74 1.21 5.46 0 9.91-4.45 9.91-9.91C21.95 6.45 17.5 2 12.04 2zm5.8 14.02c-.24.69-1.42 1.32-1.96 1.37-.5.05-1.13.07-1.83-.11-.42-.13-.96-.31-1.65-.61-2.9-1.25-4.8-4.17-4.94-4.37-.14-.19-1.18-1.57-1.18-3 0-1.43.75-2.13 1.02-2.42.26-.29.57-.36.77-.36h.55c.18 0 .42-.07.65.5.24.57.82 1.99.89 2.13.07.14.12.31.02.5-.1.19-.14.31-.29.48-.14.17-.3.37-.43.5-.14.14-.29.3-.13.59.17.29.74 1.22 1.59 1.98 1.09.97 2.01 1.27 2.3 1.41.29.14.46.12.63-.07.17-.19.72-.84.91-1.13.19-.29.38-.24.65-.14.26.1 1.69.8 1.98.94.29.14.48.22.55.34.07.12.07.69-.17 1.37z"/></svg>';
     const NOTICES = array(
@@ -27,8 +27,9 @@ class WCR_Admin {
         array_unshift( $links, '<a href="' . esc_url( self::url( array( 'tab' => 'settings' ) ) ) . '">Settings</a>' );
         return $links;
     }
+    // Marketing → WhatsApp Marketing (WooCommerce adds the Marketing menu at admin_menu priority 6).
     public static function menu() {
-        add_submenu_page( 'woocommerce', 'WhatsApp Customers', 'WhatsApp Customers', 'manage_woocommerce', self::PAGE, array( __CLASS__, 'page' ) );
+        add_submenu_page( 'woocommerce-marketing', 'WhatsApp Marketing', 'WhatsApp Marketing', 'manage_woocommerce', self::PAGE, array( __CLASS__, 'page' ) );
     }
     private static function url( $args = array() ) {
         return add_query_arg( $args, admin_url( 'admin.php?page=' . self::PAGE ) );
@@ -108,7 +109,7 @@ class WCR_Admin {
     public static function page() {
         if ( ! current_user_can( 'manage_woocommerce' ) ) return;
         $tab = self::tab();
-        echo '<div class="wrap wcr-wrap"><h1 class="wp-heading-inline">WhatsApp Customers</h1>';
+        echo '<div class="wrap wcr-wrap"><h1 class="wp-heading-inline">WhatsApp Marketing</h1>';
         $notice = sanitize_key( $_GET['wcr_notice'] ?? '' );
         if ( isset( self::NOTICES[ $notice ] ) ) echo '<div class="notice notice-' . esc_attr( self::NOTICES[ $notice ][0] ) . ' is-dismissible"><p>' . esc_html( self::NOTICES[ $notice ][1] ) . '</p></div>';
         $state = WCR_Customers::rebuild_state();

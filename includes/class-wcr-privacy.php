@@ -71,6 +71,6 @@ class WCR_Privacy {
     }
     public static function policy_text() {
         if ( ! function_exists( 'wp_add_privacy_policy_content' ) ) return;
-        wp_add_privacy_policy_content( 'WhatsApp Customer Retention', '<p>When you place an order, we use your name, phone number, email and order history (number of orders, order totals and dates) to remind you about our store on WhatsApp after a period without orders. Our staff open WhatsApp with a prepared message and send it themselves; messages are never sent automatically. We record when we contacted you, the message, any voucher we offered, and whether you opened the link in the message. You can ask us not to contact you, or to export or erase this data.</p>' );
+        wp_add_privacy_policy_content( 'WhatsApp Marketing', '<p>When you place an order, we use your name, phone number, email and order history (number of orders, order totals and dates) to remind you about our store on WhatsApp after a period without orders. Our staff open WhatsApp with a prepared message and send it themselves; messages are never sent automatically. We record when we contacted you, the message, any voucher we offered, and whether you opened the link in the message. You can ask us not to contact you, or to export or erase this data.</p>' );
     }
 }
