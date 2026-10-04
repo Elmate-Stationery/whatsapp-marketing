@@ -1,0 +1,10 @@
+{
+  "name": "wc-whatsapp-retention",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WooCommerce WhatsApp Customer Retention (WordPress plugin). package.json exists only for the dev scripts.",
+  "scripts": {
+    "lint": "node tools/lint.js",
+    "test": "node tools/lint.js && php tools/selftest.php"
+  }
+}
