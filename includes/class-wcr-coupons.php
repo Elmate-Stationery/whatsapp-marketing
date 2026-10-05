@@ -1,50 +1,54 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-// Personal vouchers. A voucher is created only when the admin clicks [WhatsApp + Voucher], never just because a
-// customer became eligible, and is reused for further voucher messages in the same reminder cycle while it is valid.
+// Personal vouchers, created by the admin with [Add Voucher] (dialog pre-filled from the voucher settings), never just
+// because a customer became eligible. A customer has at most one current voucher (unique active_customer_id), which
+// [WhatsApp + Voucher] sends. Lifecycle: generated → sent → used, or expired / revoked.
+//
+// Validity: N days counted from the day it is first sent (sent 5 Oct, 7 days → valid until the end of 12 Oct, store
+// time); sending again keeps that date. 0 / empty = no end date. Until it is sent a voucher has no end date at all.
+//
 // WooCommerce does the discount maths, minimum spend, usage limit, expiry and individual-use checks; this plugin's
-// coupons table records status (active / used / expired) and the order that used it.
+// coupons table records the status and the order that used it.
 class WCR_Coupons {
     const META          = '_wcr_coupon_id';
     const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // no 0/O, 1/I/L: easy to read out and type
-    const SESSION_KEY   = 'wcr_offer_coupon'; // WC session: voucher to apply once the cart qualifies
-    const STATUSES      = array( 'active' => 'Active', 'used' => 'Used', 'expired' => 'Expired' );
+    const OPEN          = array( 'generated', 'sent' );
+    const STATUSES      = array( 'generated' => 'Generated', 'sent' => 'Sent', 'used' => 'Used', 'expired' => 'Expired', 'revoked' => 'Revoked' );
 
     private static $cache = array();
-    private static $busy = false;
 
     public static function init() {
         add_filter( 'woocommerce_coupon_get_amount', array( __CLASS__, 'dynamic_amount' ), 10, 2 );
-        add_action( 'woocommerce_after_calculate_totals', array( __CLASS__, 'maybe_apply' ), 20 );
     }
     public static function enabled() { $s = WCR_Settings::get(); return ! empty( $s['voucher_enabled'] ); }
 
     // ---------------------------------------------------------------- Records
 
+    private static function table() { return WCR_DB::coupons_table(); }
     public static function get( $id ) {
         global $wpdb;
         $id = (int) $id;
-        if ( ! array_key_exists( $id, self::$cache ) ) self::$cache[ $id ] = $id ? $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . WCR_DB::coupons_table() . ' WHERE id=%d', $id ) ) : null;
+        if ( ! array_key_exists( $id, self::$cache ) ) self::$cache[ $id ] = $id ? $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . self::table() . ' WHERE id=%d', $id ) ) : null;
         return self::$cache[ $id ];
     }
     private static function forget( $id ) { unset( self::$cache[ (int) $id ] ); }
     public static function by_code( $code ) {
         global $wpdb;
-        return $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . WCR_DB::coupons_table() . ' WHERE code=%s', wc_strtoupper( (string) $code ) ) );
+        return $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM ' . self::table() . ' WHERE code=%s', wc_strtoupper( (string) $code ) ) );
     }
-    public static function is_expired( $row ) { return strtotime( $row->expires_at . ' UTC' ) <= time(); }
-    public static function is_usable( $row ) { return $row && 'active' === $row->status && ! self::is_expired( $row ); }
-    public static function display_status( $row ) { return 'active' === $row->status && self::is_expired( $row ) ? 'expired' : $row->status; }
-    // The voucher of the current cycle that can still be used: [ customer_id => row ] for a page of customers.
-    public static function active_for( $customers ) {
+    public static function is_expired( $row ) { return ! empty( $row->expires_at ) && strtotime( $row->expires_at . ' UTC' ) <= time(); }
+    public static function is_usable( $row ) { return $row && in_array( $row->status, self::OPEN, true ) && ! self::is_expired( $row ); }
+    // As shown to admins: an open voucher past its date shows Expired even before the daily task marks it.
+    public static function display_status( $row ) { return in_array( $row->status, self::OPEN, true ) && self::is_expired( $row ) ? 'expired' : $row->status; }
+    // Current voucher per customer: [ customer_id => row ] for a page of customer IDs.
+    public static function current_for( $customer_ids ) {
         global $wpdb;
-        $ids = array(); $cycles = array();
-        foreach ( (array) $customers as $c ) { $ids[] = (int) $c->id; $cycles[ (int) $c->id ] = $c->last_order_at; }
+        $ids = array_filter( array_map( 'absint', (array) $customer_ids ) );
         if ( ! $ids ) return array();
-        $rows = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM ' . WCR_DB::coupons_table() . " WHERE customer_id IN (" . implode( ',', $ids ) . ") AND status='active' AND expires_at > %s ORDER BY id DESC", current_time( 'mysql', true ) ) );
+        self::expire_due();
         $out = array();
-        foreach ( $rows as $r ) if ( ! isset( $out[ (int) $r->customer_id ] ) && $r->cycle_start === $cycles[ (int) $r->customer_id ] ) $out[ (int) $r->customer_id ] = $r;
+        foreach ( $wpdb->get_results( 'SELECT * FROM ' . self::table() . ' WHERE active_customer_id IN (' . implode( ',', $ids ) . ')' ) as $r ) $out[ (int) $r->customer_id ] = $r;
         return $out;
     }
     public static function discount_label( $row ) {
@@ -52,25 +56,51 @@ class WCR_Coupons {
         $pct = rtrim( rtrim( number_format( (float) $row->amount, 2, '.', '' ), '0' ), '.' ) . '%';
         return $row->max_discount ? sprintf( '%s (up to %s)', $pct, WCR_WhatsApp::plain_price( $row->max_discount ) ) : $pct;
     }
+    // End date, or what it will be: "12 October 2026" / "7 days after sending" / "No end date".
     public static function expires_label( $row ) {
-        return wp_date( get_option( 'date_format' ), strtotime( $row->expires_at . ' UTC' ) );
+        if ( ! empty( $row->expires_at ) ) return wp_date( get_option( 'date_format' ), strtotime( $row->expires_at . ' UTC' ) );
+        return (int) $row->valid_days ? sprintf( _n( '%d day after sending', '%d days after sending', (int) $row->valid_days ), (int) $row->valid_days ) : 'No end date';
+    }
+    // {coupon_validity}: "Valid until 12 October 2026." or '' when the voucher has no end date.
+    public static function validity_sentence( $row ) {
+        return ! empty( $row->expires_at ) ? sprintf( 'Valid until %s.', wp_date( get_option( 'date_format' ), strtotime( $row->expires_at . ' UTC' ) ) ) : '';
+    }
+    public static function terms_label( $row ) {
+        $parts = array( self::discount_label( $row ) . ' off' );
+        if ( $row->min_spend ) $parts[] = 'min. ' . WCR_WhatsApp::plain_price( $row->min_spend );
+        $parts[] = ! empty( $row->expires_at ) ? 'until ' . self::expires_label( $row ) : strtolower( self::expires_label( $row ) );
+        return implode( ' · ', $parts );
     }
 
-    // ---------------------------------------------------------------- Create
+    // ---------------------------------------------------------------- Create / send / revoke
 
-    // Voucher settings, validated. Returns the config or WP_Error.
-    public static function config() {
+    // Defaults for the Add Voucher dialog, from the voucher settings.
+    public static function defaults() {
         $s = WCR_Settings::get();
-        $type = 'fixed' === $s['coupon_type'] ? 'fixed' : 'percent';
-        $amount = (float) $s['coupon_amount'];
-        if ( $amount <= 0 ) return new WP_Error( 'amount', 'Set a voucher discount greater than 0 in the settings.' );
-        if ( 'percent' === $type && $amount > 100 ) return new WP_Error( 'amount', 'A percentage voucher cannot be more than 100%.' );
-        $min = '' === (string) $s['coupon_min_spend'] ? null : max( 0, (float) $s['coupon_min_spend'] );
-        $max = '' === (string) $s['coupon_max_discount'] || 'percent' !== $type ? null : max( 0, (float) $s['coupon_max_discount'] ); // a cap only makes sense for percentages
         return array(
-            'type' => $type, 'amount' => $amount, 'min_spend' => $min ? $min : null, 'max_discount' => $max ? $max : null,
-            'expiry_days' => min( 365, max( 1, (int) $s['coupon_expiry_days'] ) ), 'usage_limit' => max( 0, (int) $s['coupon_usage_limit'] ),
-            'individual' => ! empty( $s['coupon_individual'] ), 'restrict_email' => ! empty( $s['coupon_restrict_email'] ),
+            'type' => 'fixed' === $s['coupon_type'] ? 'fixed' : 'percent', 'amount' => $s['coupon_amount'], 'min_spend' => $s['coupon_min_spend'], 'max_discount' => $s['coupon_max_discount'],
+            'valid_days' => (int) $s['coupon_expiry_days'] ? (int) $s['coupon_expiry_days'] : '', 'usage_limit' => (int) $s['coupon_usage_limit'],
+            'individual' => ! empty( $s['coupon_individual'] ) ? 1 : 0, 'restrict_email' => ! empty( $s['coupon_restrict_email'] ) ? 1 : 0,
+        );
+    }
+    // Validates one voucher's values (dialog input); returns the clean config or WP_Error.
+    public static function clean_config( $in ) {
+        $num = function ( $key ) use ( $in ) { $v = isset( $in[ $key ] ) ? trim( (string) wp_unslash( $in[ $key ] ) ) : ''; return '' === $v ? null : (float) $v; };
+        $type = ( isset( $in['type'] ) && 'fixed' === $in['type'] ) ? 'fixed' : 'percent';
+        $amount = $num( 'amount' ); $min = $num( 'min_spend' ); $max = $num( 'max_discount' ); $days = $num( 'valid_days' ); $limit = $num( 'usage_limit' );
+        if ( ! $amount || $amount <= 0 ) return new WP_Error( 'amount', 'Enter a discount greater than 0.' );
+        if ( 'percent' === $type && $amount > 100 ) return new WP_Error( 'amount', 'A percentage discount cannot be more than 100%.' );
+        if ( null !== $min && $min < 0 ) return new WP_Error( 'min', 'The minimum spend cannot be negative.' );
+        if ( null !== $max && $max < 0 ) return new WP_Error( 'max', 'The maximum discount cannot be negative.' );
+        if ( null !== $days && ( $days < 0 || $days > 365 || floor( $days ) != $days ) ) return new WP_Error( 'days', 'Validity must be a whole number of days from 0 to 365 (0 or empty = no end date).' );
+        if ( null !== $limit && ( $limit < 0 || $limit > 100 || floor( $limit ) != $limit ) ) return new WP_Error( 'limit', 'The usage limit must be a whole number from 0 to 100 (0 = unlimited).' );
+        $dp = wc_get_price_decimals();
+        return array(
+            'type' => $type, 'amount' => round( $amount, 'percent' === $type ? 2 : $dp ),
+            'min_spend' => $min ? round( $min, $dp ) : null,
+            'max_discount' => ( 'percent' === $type && $max ) ? round( $max, $dp ) : null, // a cap only makes sense for percentages
+            'valid_days' => (int) $days, 'usage_limit' => null === $limit ? 1 : (int) $limit,
+            'individual' => ! empty( $in['individual'] ), 'restrict_email' => ! empty( $in['restrict_email'] ),
         );
     }
     // e.g. prefix "" + "RAHIM" + "10" + "X7KQ" = RAHIM10X7KQ. Names without Latin letters (e.g. Bangla) are left out.
@@ -85,31 +115,27 @@ class WCR_Coupons {
         for ( $i = 0; $i < 4; $i++ ) $rand .= self::CODE_ALPHABET[ random_int( 0, strlen( self::CODE_ALPHABET ) - 1 ) ];
         return $base . $rand;
     }
-    // The current cycle's valid voucher, or a new one.
-    public static function for_customer( $c ) {
-        $active = self::active_for( array( $c ) );
-        return isset( $active[ (int) $c->id ] ) ? $active[ (int) $c->id ] : self::create( $c );
-    }
-    public static function create( $c ) {
+    // One current voucher per customer is enforced by the unique active_customer_id column, so two simultaneous
+    // clicks can never create two.
+    public static function create( $c, $config ) {
         global $wpdb;
-        $config = self::config();
-        if ( is_wp_error( $config ) ) return $config;
-        $ct = WCR_DB::coupons_table();
+        $ct = self::table();
         $now = current_time( 'mysql', true );
-        // Valid until the end of the last day, store time.
-        $expires = ( new DateTimeImmutable( 'today', wp_timezone() ) )->modify( '+' . $config['expiry_days'] . ' days' )->setTime( 23, 59, 59 );
-        $expires_utc = $expires->setTimezone( new DateTimeZone( 'UTC' ) )->format( 'Y-m-d H:i:s' );
+        self::expire_due(); // frees the slot of a voucher past its date but not yet marked
         $ok = false;
         for ( $try = 0; $try < 5 && ! $ok; $try++ ) {
             $code = self::new_code( $c, $config );
             if ( wc_get_coupon_id_by_code( $code ) ) continue;
             $suppress = $wpdb->suppress_errors( true );
             $ok = $wpdb->insert( $ct, array(
-                'customer_id' => (int) $c->id, 'code' => $code, 'discount_type' => $config['type'], 'amount' => $config['amount'],
+                'customer_id' => (int) $c->id, 'active_customer_id' => (int) $c->id, 'code' => $code, 'discount_type' => $config['type'], 'amount' => $config['amount'],
                 'min_spend' => $config['min_spend'], 'max_discount' => $config['max_discount'], 'usage_limit' => $config['usage_limit'], 'individual_use' => $config['individual'] ? 1 : 0,
-                'cycle_start' => $c->last_order_at, 'expires_at' => $expires_utc, 'status' => 'active', 'created_at' => $now, 'created_by' => get_current_user_id() ?: null,
+                'restrict_email' => $config['restrict_email'] ? 1 : 0, 'valid_days' => $config['valid_days'], 'cycle_start' => $c->last_order_at,
+                'status' => 'generated', 'created_at' => $now, 'created_by' => get_current_user_id() ?: null,
             ) );
+            $error = $wpdb->last_error;
             $wpdb->suppress_errors( $suppress );
+            if ( ! $ok && false !== stripos( $error, 'active_customer_id' ) ) return new WP_Error( 'active', 'This customer already has a voucher. Revoke it first to create a new one.' );
         }
         if ( ! $ok ) return new WP_Error( 'code', 'Could not create a unique voucher code. Please try again.' );
         $id = (int) $wpdb->insert_id;
@@ -123,11 +149,10 @@ class WCR_Coupons {
             if ( $config['min_spend'] ) $coupon->set_minimum_amount( $config['min_spend'] );
             $coupon->set_usage_limit( $config['usage_limit'] );
             $coupon->set_individual_use( $config['individual'] );
-            $coupon->set_date_expires( $expires->getTimestamp() );
             if ( $config['restrict_email'] && is_email( $c->email ) ) $coupon->set_email_restrictions( array( $c->email ) );
             $coupon->set_description( sprintf( 'WhatsApp reminder voucher for %s. Created by WhatsApp Marketing.', $c->name ? $c->name : 'customer #' . (int) $c->id ) );
             $coupon->update_meta_data( self::META, $id );
-            $wc_id = $coupon->save();
+            $wc_id = $coupon->save(); // no end date until it is sent
         } catch ( Exception $e ) {
             $wc_id = 0;
         }
@@ -135,6 +160,47 @@ class WCR_Coupons {
         $wpdb->update( $ct, array( 'wc_coupon_id' => $wc_id ), array( 'id' => $id ) );
         self::forget( $id );
         return self::get( $id );
+    }
+    // First send: status Sent, and the validity period starts (end of the Nth day after today, store time).
+    public static function mark_sent( $row ) {
+        global $wpdb;
+        $now = current_time( 'mysql', true );
+        $data = array( 'status' => 'sent' );
+        if ( ! $row->sent_at ) $data['sent_at'] = $now;
+        if ( (int) $row->valid_days && empty( $row->expires_at ) ) {
+            $end = ( new DateTimeImmutable( 'today', wp_timezone() ) )->modify( '+' . (int) $row->valid_days . ' days' )->setTime( 23, 59, 59 );
+            $data['expires_at'] = $end->setTimezone( new DateTimeZone( 'UTC' ) )->format( 'Y-m-d H:i:s' );
+            $coupon = new WC_Coupon( (int) $row->wc_coupon_id );
+            if ( $coupon->get_id() ) { $coupon->set_date_expires( $end->getTimestamp() ); $coupon->save(); }
+        }
+        $wpdb->update( self::table(), $data, array( 'id' => (int) $row->id ) );
+        self::forget( $row->id );
+        return self::get( $row->id );
+    }
+    public static function revoke( $row, $reason = '', $by = null ) {
+        global $wpdb;
+        // revoked_by 0 = revoked automatically (prepare() cannot write NULL).
+        $n = $wpdb->query( $wpdb->prepare( 'UPDATE ' . self::table() . " SET status='revoked', active_customer_id=NULL, revoked_at=%s, revoked_by=%d, revoke_reason=%s WHERE id=%d AND status IN ('generated','sent')",
+            current_time( 'mysql', true ), null === $by ? get_current_user_id() : (int) $by, mb_substr( (string) $reason, 0, 100 ), $row->id ) );
+        self::forget( $row->id );
+        if ( 1 !== $n ) return false;
+        self::close_wc_coupon( $row );
+        return true;
+    }
+    // The WooCommerce coupon itself is expired too, so it stays unusable even without this plugin.
+    private static function close_wc_coupon( $row ) {
+        if ( ! $row || ! $row->wc_coupon_id ) return;
+        $coupon = new WC_Coupon( (int) $row->wc_coupon_id );
+        if ( $coupon->get_id() ) { $coupon->set_date_expires( time() - MINUTE_IN_SECONDS ); $coupon->save(); }
+    }
+    // The customer ordered again (new reminder cycle): a voucher never sent is revoked; a sent one stays valid (the
+    // customer was promised it) but is no longer the current voucher, so a new one can be added in the new cycle.
+    public static function on_new_cycle( $customer_id ) {
+        global $wpdb;
+        $ct = self::table();
+        foreach ( $wpdb->get_results( $wpdb->prepare( "SELECT * FROM $ct WHERE active_customer_id=%d AND status='generated'", $customer_id ) ) as $row ) self::revoke( $row, 'Not sent before the customer ordered again', 0 );
+        $wpdb->query( $wpdb->prepare( "UPDATE $ct SET active_customer_id=NULL WHERE active_customer_id=%d", $customer_id ) );
+        self::$cache = array();
     }
 
     // ---------------------------------------------------------------- Status from orders
@@ -145,7 +211,7 @@ class WCR_Coupons {
     }
     public static function sync_order( $order ) {
         global $wpdb;
-        $ct = WCR_DB::coupons_table();
+        $ct = self::table();
         $codes = array_map( 'wc_strtolower', $order->get_coupon_codes() );
         $live = in_array( $order->get_status(), self::holding_statuses(), true );
         // Vouchers this order held but no longer does (cancelled, failed, refunded, coupon removed) can be used again.
@@ -158,29 +224,38 @@ class WCR_Coupons {
             $row = self::by_code( $item->get_code() );
             if ( ! $row || ( 'used' === $row->status && (int) $row->order_id === $order->get_id() ) ) continue;
             $discount = (float) $item->get_discount() + ( $incl ? (float) $item->get_discount_tax() : 0 );
-            $wpdb->query( $wpdb->prepare( "UPDATE $ct SET status='used', used_at=%s, order_id=%d, discount_total=%s WHERE id=%d AND status IN ('active','expired')", current_time( 'mysql', true ), $order->get_id(), wc_format_decimal( $discount ), $row->id ) );
+            $wpdb->query( $wpdb->prepare( "UPDATE $ct SET status='used', used_at=%s, order_id=%d, discount_total=%s, active_customer_id=NULL WHERE id=%d AND status IN ('generated','sent','expired')", current_time( 'mysql', true ), $order->get_id(), wc_format_decimal( $discount ), $row->id ) );
             self::forget( $row->id );
         }
     }
     public static function order_gone( $order_id ) {
         global $wpdb;
-        foreach ( $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM ' . WCR_DB::coupons_table() . " WHERE order_id=%d AND status='used'", $order_id ) ) as $row ) self::release( $row );
+        foreach ( $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM ' . self::table() . " WHERE order_id=%d AND status='used'", $order_id ) ) as $row ) self::release( $row );
     }
+    // Back to what it was before the order. It becomes the current voucher again if it belongs to the customer's
+    // current cycle and they have no newer one (the unique slot refuses a second).
     private static function release( $row ) {
         global $wpdb;
-        $wpdb->update( WCR_DB::coupons_table(), array( 'status' => self::is_expired( $row ) ? 'expired' : 'active', 'used_at' => null, 'order_id' => null, 'discount_total' => null ), array( 'id' => (int) $row->id ) );
+        $status = self::is_expired( $row ) ? 'expired' : ( $row->sent_at ? 'sent' : 'generated' );
+        $wpdb->update( self::table(), array( 'status' => $status, 'used_at' => null, 'order_id' => null, 'discount_total' => null ), array( 'id' => (int) $row->id ) );
+        $cycle = $wpdb->get_var( $wpdb->prepare( 'SELECT last_order_at FROM ' . WCR_DB::customers_table() . ' WHERE id=%d', $row->customer_id ) );
+        if ( 'expired' !== $status && $cycle === $row->cycle_start ) {
+            $suppress = $wpdb->suppress_errors( true );
+            $wpdb->update( self::table(), array( 'active_customer_id' => (int) $row->customer_id ), array( 'id' => (int) $row->id ) );
+            $wpdb->suppress_errors( $suppress );
+        }
         self::forget( $row->id );
     }
-    // Daily.
+    // Daily, and before vouchers are listed or created.
     public static function expire_due() {
         global $wpdb;
-        $wpdb->query( $wpdb->prepare( 'UPDATE ' . WCR_DB::coupons_table() . " SET status='expired' WHERE status='active' AND expires_at <= %s", current_time( 'mysql', true ) ) );
+        $wpdb->query( $wpdb->prepare( 'UPDATE ' . self::table() . " SET status='expired', active_customer_id=NULL WHERE status IN ('generated','sent') AND expires_at IS NOT NULL AND expires_at <= %s", current_time( 'mysql', true ) ) );
         self::$cache = array();
     }
 
     // ---------------------------------------------------------------- Cart
 
-    private static function cart_basis( $cart = null ) {
+    public static function cart_basis( $cart = null ) {
         $cart = $cart ? $cart : ( function_exists( 'WC' ) ? WC()->cart : null );
         return $cart ? (float) $cart->get_displayed_subtotal() : 0.0;
     }
@@ -195,56 +270,16 @@ class WCR_Coupons {
         if ( $basis <= 0 ) return $amount;
         return (float) wc_format_decimal( min( $basis * (float) $row->amount / 100, (float) $row->max_discount ), wc_get_price_decimals() );
     }
-    // Offer link opened: remember the voucher in this browser's session; it is applied as soon as the cart qualifies.
-    public static function offer_opened( $coupon_id ) {
-        $row = self::get( $coupon_id );
-        if ( ! function_exists( 'WC' ) || ! WC()->session ) return;
-        // Guests on a new device have no WooCommerce session yet; start one so the voucher (and notices) persist.
-        if ( ! WC()->session->has_session() ) WC()->session->set_customer_session_cookie( true );
-        if ( ! self::is_usable( $row ) ) {
-            wc_add_notice( 'The voucher in this link has expired or has already been used.', 'notice' );
-            return;
-        }
-        WC()->session->set( self::SESSION_KEY, (int) $row->id );
-        $cart = WC()->cart;
-        if ( $cart && ! $cart->is_empty() ) $cart->calculate_totals();
-        if ( WC()->session->get( self::SESSION_KEY ) ) {
-            $min = $row->min_spend ? sprintf( ' on orders of %s or more', WCR_WhatsApp::plain_price( $row->min_spend ) ) : '';
-            wc_add_notice( esc_html( sprintf( 'Your voucher %1$s (%2$s off%3$s) will be applied automatically to your cart.', $row->code, self::discount_label( $row ), $min ) ), 'notice' );
-        }
-    }
-    public static function maybe_apply( $cart ) {
-        if ( self::$busy || ! function_exists( 'WC' ) || ! WC()->session ) return;
-        $id = (int) WC()->session->get( self::SESSION_KEY );
-        if ( ! $id ) return;
-        $row = self::get( $id );
-        if ( ! self::is_usable( $row ) ) { WC()->session->set( self::SESSION_KEY, null ); return; }
-        if ( $cart->is_empty() ) return;
-        $code = wc_format_coupon_code( $row->code );
-        if ( $cart->has_discount( $code ) ) { WC()->session->set( self::SESSION_KEY, null ); return; }
-        if ( $row->min_spend && self::cart_basis( $cart ) < (float) $row->min_spend ) return; // wait until the cart qualifies
-        self::$busy = true;
-        $notices = wc_get_notices();
-        $ok = $cart->apply_coupon( $code );
-        wc_set_notices( $notices ); // WooCommerce's own message is replaced by ours below
-        if ( $ok ) $cart->calculate_totals();
-        self::$busy = false;
-        // Applied, or refused for another reason (e.g. email restriction, another individual-use coupon): stop trying.
-        WC()->session->set( self::SESSION_KEY, null );
-        $rest = ( defined( 'REST_REQUEST' ) && REST_REQUEST ) || WC()->is_rest_api_request();
-        if ( $ok && ! $rest ) wc_add_notice( esc_html( sprintf( 'Voucher %1$s applied: %2$s off.', $row->code, self::discount_label( $row ) ) ), 'success' );
-    }
 
     // ---------------------------------------------------------------- Reports
 
     public static function performance() {
         global $wpdb;
-        $ct = WCR_DB::coupons_table(); $kt = WCR_DB::contacts_table(); $ot = WCR_DB::orders_table();
+        self::expire_due();
+        $ct = self::table(); $ot = WCR_DB::orders_table();
         $in = implode( ',', array_map( function ( $v ) use ( $wpdb ) { return $wpdb->prepare( '%s', $v ); }, WCR_Settings::counted_statuses() ) );
-        $now = current_time( 'mysql', true );
-        $row = $wpdb->get_row( $wpdb->prepare( "SELECT COUNT(*) AS generated, COALESCE(SUM(status='used'),0) AS used, COALESCE(SUM(status='expired' OR (status='active' AND expires_at <= %s)),0) AS expired,
-            COALESCE(SUM(status='active' AND expires_at > %s),0) AS active, COALESCE(SUM(CASE WHEN status='used' THEN discount_total END),0) AS discount FROM $ct", $now, $now ) );
-        $row->sent = (int) $wpdb->get_var( "SELECT COUNT(DISTINCT coupon_id) FROM $kt WHERE coupon_id IS NOT NULL AND status<>'undone'" );
+        $row = $wpdb->get_row( "SELECT COUNT(*) AS generated, COALESCE(SUM(status='generated'),0) AS unsent, COALESCE(SUM(sent_at IS NOT NULL),0) AS sent, COALESCE(SUM(status='used'),0) AS used,
+            COALESCE(SUM(status='expired'),0) AS expired, COALESCE(SUM(status='revoked'),0) AS revoked, COALESCE(SUM(CASE WHEN status='used' THEN discount_total END),0) AS discount FROM $ct" );
         $conv = $wpdb->get_row( "SELECT COUNT(*) AS orders, COALESCE(SUM(o.net_total),0) AS revenue FROM $ct c JOIN $ot o ON o.order_id=c.order_id WHERE c.status='used' AND o.status IN ($in)" );
         $row->converted = (int) $conv->orders;
         $row->revenue = (float) $conv->revenue;

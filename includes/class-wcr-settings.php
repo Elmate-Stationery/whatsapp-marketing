@@ -5,7 +5,9 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 class WCR_Settings {
     const OPTION = 'wcr_settings';
     const DEFAULT_PLAIN   = "Hello {customer_name}, we miss you! It's been {days_since_last_order} days since your last order at {site_name}. Come back and check out our latest products.\n\n{offer_url}";
-    const DEFAULT_VOUCHER = "Hello {customer_name}, we miss you! Here's a special {coupon_discount} discount for your next order at {site_name}. Use code {coupon_code}. Valid until {coupon_expires}.\n\nShop now: {offer_url}";
+    const DEFAULT_VOUCHER = "Hello {customer_name}, we miss you! Here's a special {coupon_discount} discount for your next order at {site_name}. Use code {coupon_code}. {coupon_validity}\n\nShop now: {offer_url}";
+    // Default of 1.0.0; saved, unedited copies are upgraded to DEFAULT_VOUCHER.
+    const LEGACY_VOUCHER  = "Hello {customer_name}, we miss you! Here's a special {coupon_discount} discount for your next order at {site_name}. Use code {coupon_code}. Valid until {coupon_expires}.\n\nShop now: {offer_url}";
     // Orders in these statuses are "open": the customer is mid-purchase, so they are not reminded.
     const OPEN_STATUSES = array( 'pending', 'processing', 'on-hold' );
 
@@ -20,6 +22,7 @@ class WCR_Settings {
             'counted_statuses'   => array( 'completed' ),
             'country_code'       => '880',
             'offer_destination'  => 'shop',
+            'offer_popup'        => 1,
             'template_plain'     => self::DEFAULT_PLAIN,
             'template_voucher'   => self::DEFAULT_VOUCHER,
             'voucher_enabled'    => 1,

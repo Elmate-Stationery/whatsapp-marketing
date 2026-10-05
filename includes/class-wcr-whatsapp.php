@@ -24,7 +24,8 @@ class WCR_WhatsApp {
         '{offer_url}'             => 'Personal shop link (applies the voucher, counts opens)',
         '{coupon_code}'           => 'Voucher code',
         '{coupon_discount}'       => 'e.g. "10%", "10% (up to ৳500)" or "৳200"',
-        '{coupon_expires}'        => 'Voucher expiry date',
+        '{coupon_validity}'       => '"Valid until 12 October 2026." (empty when the voucher has no end date)',
+        '{coupon_expires}'        => 'Voucher end date (empty when it has none)',
         '{coupon_minimum_spend}'  => 'Voucher minimum spend (empty when there is none)',
     );
     // Link-preview fetchers (WhatsApp, Facebook, Telegram, ...) must not count as the customer opening the link.
@@ -108,7 +109,8 @@ class WCR_WhatsApp {
             '{offer_url}'             => $offer_url,
             '{coupon_code}'           => $coupon ? $coupon->code : '',
             '{coupon_discount}'       => $coupon ? WCR_Coupons::discount_label( $coupon ) : '',
-            '{coupon_expires}'        => $coupon ? WCR_Coupons::expires_label( $coupon ) : '',
+            '{coupon_validity}'       => $coupon ? WCR_Coupons::validity_sentence( $coupon ) : '',
+            '{coupon_expires}'        => $coupon && ! empty( $coupon->expires_at ) ? WCR_Coupons::expires_label( $coupon ) : '',
             '{coupon_minimum_spend}'  => $coupon && $coupon->min_spend ? self::plain_price( $coupon->min_spend ) : '',
         );
     }
@@ -120,6 +122,8 @@ class WCR_WhatsApp {
     }
     public static function message( $c, $type, $coupon = null, $offer_url = '' ) {
         $message = strtr( self::template( $type ), self::values( $c, $coupon, $offer_url ) );
+        // Empty placeholders (e.g. {coupon_validity} without an end date) leave no double or trailing spaces.
+        $message = preg_replace( array( '/[ \t]{2,}/', '/[ \t]+$/m' ), array( ' ', '' ), $message );
         return mb_substr( trim( $message ), 0, self::MAX_MESSAGE_LENGTH );
     }
 
@@ -133,19 +137,26 @@ class WCR_WhatsApp {
         if ( ! $c || (int) $c->order_count < 1 ) wp_send_json_error( array( 'message' => 'This customer no longer exists.' ), 404 );
         return $c;
     }
-    // [WhatsApp] / [WhatsApp + Voucher]. Outside Eligible / Follow-up due, the admin has confirmed in the browser (force=1).
+    // Customers who can be contacted now: WhatsApp buttons and Add Voucher are shown (and accepted) only for these.
+    public static function is_due( $c ) {
+        return ! (int) $c->dnc && '' !== $c->wa_number && in_array( $c->state, array( 'eligible', 'followup' ), true );
+    }
+    // [WhatsApp] / [WhatsApp + Voucher]. [WhatsApp + Voucher] sends the customer's current voucher (added by the admin);
+    // its validity period starts with the first send.
     public static function ajax_contact() {
         self::guard();
         $c = self::customer_or_fail();
         $type = 'voucher' === ( $_POST['type'] ?? '' ) ? 'voucher' : 'plain';
         if ( (int) $c->dnc ) wp_send_json_error( array( 'message' => 'This customer is marked Do not contact. Remove the mark in their history first.' ), 400 );
         if ( '' === $c->wa_number ) wp_send_json_error( array( 'message' => 'This customer has no valid WhatsApp number.' ), 400 );
-        if ( ! in_array( $c->state, array( 'eligible', 'followup' ), true ) && empty( $_POST['force'] ) ) wp_send_json_error( array( 'message' => 'This customer is not due for a reminder. Reload the page and try again.' ), 409 );
+        if ( ! self::is_due( $c ) ) wp_send_json_error( array( 'message' => 'This customer is not due for a reminder. Reload the page to see their current status.' ), 409 );
         $coupon = null;
         if ( 'voucher' === $type ) {
             if ( ! WCR_Coupons::enabled() ) wp_send_json_error( array( 'message' => 'Vouchers are turned off in the settings.' ), 400 );
-            $coupon = WCR_Coupons::for_customer( $c );
-            if ( is_wp_error( $coupon ) ) wp_send_json_error( array( 'message' => $coupon->get_error_message() ), 400 );
+            $current = WCR_Coupons::current_for( array( $c->id ) );
+            $coupon = $current[ (int) $c->id ] ?? null;
+            if ( ! WCR_Coupons::is_usable( $coupon ) ) wp_send_json_error( array( 'message' => 'This customer has no valid voucher. Add a voucher first.' ), 400 );
+            $coupon = WCR_Coupons::mark_sent( $coupon );
         }
         global $wpdb;
         $offer = ''; $hash = null;
@@ -219,7 +230,7 @@ class WCR_WhatsApp {
                 $now = current_time( 'mysql', true );
                 $wpdb->query( $wpdb->prepare( "UPDATE $kt SET link_opens=link_opens+1, first_open_at=COALESCE(first_open_at,%s), last_open_at=%s, last_device=%s WHERE id=%d", $now, $now, self::device_label( $agent ), $k->id ) );
             }
-            if ( $k->coupon_id ) WCR_Coupons::offer_opened( (int) $k->coupon_id );
+            if ( $k->coupon_id ) WCR_Storefront::offer_opened( (int) $k->coupon_id );
         }
         wp_safe_redirect( $destination );
         exit;

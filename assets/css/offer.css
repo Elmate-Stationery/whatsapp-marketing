@@ -1,0 +1,28 @@
+/* Voucher offer popup + voucher messages (storefront). Neutral styling that sits on any theme. */
+.wcr-offer{--wcr-ink:#1d2327;--wcr-muted:#50575e;--wcr-line:#e2e4e7;--wcr-bg:#fff;--wcr-accent:#128c4a;--wcr-button:var(--tm-primary-color,#006eb6);position:fixed;inset:0;z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px;background:rgba(0,0,0,.55)}
+html.wcr-offer-open,html.wcr-offer-open body{overflow:hidden}
+.wcr-offer__box{position:relative;width:100%;max-width:420px;max-height:100%;overflow:auto;padding:28px 24px 22px;border-radius:12px;background:var(--wcr-bg);color:var(--wcr-ink);box-shadow:0 20px 50px rgba(0,0,0,.3);font-size:16px;line-height:1.45;outline:0}
+.wcr-offer__title{margin:0 0 6px;font-size:22px;line-height:1.25;color:var(--wcr-ink)}
+.wcr-offer__intro{margin:0 0 16px;color:var(--wcr-muted)}
+.wcr-offer__code{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 14px;padding:10px 10px 10px 16px;border:2px dashed var(--wcr-accent);border-radius:10px;background:#f2faf5}
+.wcr-offer__code-text{font-family:Consolas,Monaco,monospace;font-size:20px;font-weight:700;letter-spacing:.06em;color:var(--wcr-ink);overflow-wrap:anywhere}
+html body .wcr-offer .wcr-offer__copy{flex:none;min-height:40px;margin:0;padding:8px 14px;border:1px solid var(--wcr-accent)!important;border-radius:8px;background:#fff!important;color:var(--wcr-accent)!important;font-size:14px;font-weight:600;line-height:1.2;text-transform:none;box-shadow:none!important;cursor:pointer}
+.wcr-offer__rows{margin:0 0 14px;padding:0}
+.wcr-offer__row{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid var(--wcr-line)}
+.wcr-offer__row dt,.wcr-offer__row dd{margin:0}
+.wcr-offer__row dt{color:var(--wcr-muted)}
+.wcr-offer__row dd{font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+.wcr-offer__row.is-discount dd{color:var(--wcr-accent)}
+.wcr-offer__row.is-total dt,.wcr-offer__row.is-total dd{color:var(--wcr-ink);font-size:20px;font-weight:700}
+.wcr-offer__row:last-child{border-bottom:0}
+.wcr-offer__note{margin:0 0 18px;color:var(--wcr-muted);font-size:14px}
+.wcr-offer__actions{display:flex;flex-direction:column;gap:8px}
+/* Theme button styles (background, colour, borders, outlines) are overridden in every state so the button stays readable. */
+html body .wcr-offer .wcr-offer__box .wcr-offer__cta,html body .wcr-offer .wcr-offer__box .wcr-offer__cta:hover,html body .wcr-offer .wcr-offer__box .wcr-offer__cta:focus,html body .wcr-offer .wcr-offer__box .wcr-offer__cta:active{display:block;width:100%;min-height:48px;margin:0;padding:14px 16px;border:0!important;border-radius:8px;background:var(--wcr-button)!important;background-image:none!important;color:#fff!important;font-size:17px;font-weight:600;line-height:1.2;letter-spacing:normal;text-align:center;text-transform:none;text-decoration:none!important;text-shadow:none!important;box-shadow:none!important;outline:none!important;opacity:1!important;cursor:pointer}
+html body .wcr-offer .wcr-offer__box .wcr-offer__cta:hover{filter:brightness(.9)}
+html body .wcr-offer .wcr-offer__box .wcr-offer__cta:focus-visible,html body .wcr-offer .wcr-offer__copy:focus-visible{outline:3px solid var(--wcr-button)!important;outline-offset:3px!important}
+.wcr-toasts{position:fixed;left:50%;bottom:20px;z-index:99999;display:flex;flex-direction:column;gap:8px;width:min(560px,calc(100vw - 32px));transform:translateX(-50%)}
+.wcr-toast{display:flex;align-items:flex-start;gap:12px;padding:12px 12px 12px 16px;border-left:4px solid #128c4a;border-radius:6px;background:#fff;color:#1d2327;box-shadow:0 6px 24px rgba(0,0,0,.18);font-size:15px;line-height:1.45}
+.wcr-toast span{flex:1}
+.wcr-toast__close{flex:none;width:28px;height:28px;padding:0;border:0;background:transparent;color:#50575e;font-size:22px;line-height:1;cursor:pointer}
+@media (max-width:480px){.wcr-offer{padding:0;align-items:flex-end}.wcr-offer__box{max-width:none;border-radius:16px 16px 0 0;padding:26px 20px 20px}}

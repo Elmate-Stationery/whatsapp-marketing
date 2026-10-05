@@ -194,6 +194,7 @@ class WCR_Customers {
         // A newer counted order: close the reminder cycle and start a new one from this order.
         if ( $last && ( null === $c->last_order_at || $last->created_at > $c->last_order_at ) ) {
             $winner = self::close_cycle( $c, $last );
+            WCR_Coupons::on_new_cycle( (int) $c->id );
             $data += array( 'last_contact_at' => null, 'last_contact_by' => null, 'last_contact_type' => null, 'cycle_contacts' => 0, 'cycle_voucher' => 0 );
             if ( $winner ) $data += array( 'conversions' => (int) $c->conversions + 1, 'last_converted_order_id' => (int) $last->order_id, 'last_converted_at' => current_time( 'mysql', true ) );
         }

@@ -43,7 +43,9 @@ th.wcr-num a{justify-content:flex-end}
 .wcr-badge--open_order{background:#f3e8ff;color:#5b2a86}
 .wcr-badge--dnc{background:#fcf0f1;color:#8a2424}
 .wcr-badge--converted,.wcr-badge--coupon-used{background:#e6f7ed;color:#00632a}
-.wcr-badge--coupon-active{background:#e7f3ff;color:#135e96}
+.wcr-badge--coupon-generated{background:#fff3cd;color:#6e4e00}
+.wcr-badge--coupon-sent{background:#e7f3ff;color:#135e96}
+.wcr-badge--coupon-revoked{background:#fcf0f1;color:#8a2424}
 .wcr-badge--undone,.wcr-badge--closed,.wcr-badge--coupon-expired{background:#f0f0f1;color:#50575e}
 .wcr-status-lines{display:block;margin-top:4px;color:#50575e;line-height:1.45}
 .wcr-open-state{color:#646970}
@@ -108,3 +110,27 @@ th.wcr-num a{justify-content:flex-end}
   .wcr-dialog{width:100vw;max-width:none;height:100%;max-height:none;border-radius:0}
   .wcr-dialog__body{padding:16px}
 }
+
+/* Voucher column + Add Voucher dialog */
+.wcr-voucher-col{width:200px}
+.wcr-voucher-cell .wcr-code{padding:1px 5px;font-size:12px}
+.wcr-voucher-cell .wcr-voucher-note{display:block;margin-top:4px}
+.wcr-voucher-revoke{display:block;margin-top:4px!important;font-size:12px!important;color:#b32d2e!important}
+.wcr-customers.has-vouchers{min-width:1380px}
+.wcr-dialog--narrow{width:min(560px,calc(100vw - 32px))}
+.wcr-voucher-form{display:flex;flex-direction:column;min-height:0;max-height:calc(100vh - 64px)}
+.wcr-voucher-for{margin-top:0;color:#50575e}
+.wcr-field{display:flex;flex-direction:column;gap:4px;margin:0 0 12px;padding:0;border:0}
+.wcr-field legend{margin-bottom:6px;font-weight:600}
+.wcr-field span{font-weight:600}
+.wcr-field input[type=number]{width:100%}
+.wcr-field[hidden]{display:none}
+.wcr-unit{font-style:normal;color:#50575e}
+.wcr-field-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 16px}
+.wcr-check-line{display:block;margin:0 0 8px}
+.wcr-voucher-warn{margin:8px 0 0;padding:8px 12px;border-left:4px solid #dba617;background:#fcf9e8}
+.wcr-voucher-warn[hidden],.wcr-dialog__error[hidden]{display:none}
+.wcr-dialog__footer{flex:none;display:flex;justify-content:flex-end;gap:8px;padding:12px 24px;border-top:1px solid #dcdcde;background:#f6f7f7}
+.wcr-settings-sub{padding:16px 0 0!important}
+.wcr-warn-text{color:#996800!important}
+@media (max-width:600px){.wcr-field-grid{grid-template-columns:minmax(0,1fr)}}

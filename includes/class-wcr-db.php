@@ -103,6 +103,7 @@ class WCR_DB {
         CREATE TABLE $coupons (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
             customer_id BIGINT UNSIGNED NOT NULL,
+            active_customer_id BIGINT UNSIGNED NULL,
             wc_coupon_id BIGINT UNSIGNED NULL,
             code VARCHAR(40) NOT NULL,
             discount_type VARCHAR(10) NOT NULL,
@@ -111,21 +112,41 @@ class WCR_DB {
             max_discount DECIMAL(20,6) NULL,
             usage_limit INT UNSIGNED NOT NULL DEFAULT 1,
             individual_use TINYINT(1) NOT NULL DEFAULT 1,
+            restrict_email TINYINT(1) NOT NULL DEFAULT 0,
+            valid_days INT UNSIGNED NOT NULL DEFAULT 0,
             cycle_start DATETIME NULL,
-            expires_at DATETIME NOT NULL,
-            status VARCHAR(20) NOT NULL DEFAULT 'active',
+            expires_at DATETIME NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'generated',
             created_at DATETIME NOT NULL,
             created_by BIGINT UNSIGNED NULL,
+            sent_at DATETIME NULL,
             used_at DATETIME NULL,
             order_id BIGINT UNSIGNED NULL,
             discount_total DECIMAL(20,6) NULL,
+            revoked_at DATETIME NULL,
+            revoked_by BIGINT UNSIGNED NULL,
+            revoke_reason VARCHAR(100) NULL,
             PRIMARY KEY  (id),
             UNIQUE KEY code (code),
+            UNIQUE KEY active_customer_id (active_customer_id),
             KEY customer_status (customer_id, status),
             KEY status (status),
             KEY order_id (order_id)
         ) $charset;";
+        $from = (string) get_option( 'wcr_db_version', '0' );
         dbDelta( $sql );
+        // 1.0.0 → 1.1.0: vouchers get no end date until sent (dbDelta does not relax NOT NULL), and 'active' became
+        // generated / sent.
+        if ( '0' !== $from && version_compare( $from, '1.1.0', '<' ) ) {
+            $wpdb->query( "ALTER TABLE $coupons MODIFY expires_at DATETIME NULL" );
+            $wpdb->query( "UPDATE $coupons cp SET cp.sent_at = (SELECT MIN(k.created_at) FROM $contacts k WHERE k.coupon_id = cp.id AND k.status <> 'undone') WHERE cp.sent_at IS NULL" );
+            $wpdb->query( "UPDATE $coupons SET status = IF(sent_at IS NULL, 'generated', 'sent') WHERE status = 'active'" );
+            $settings = get_option( WCR_Settings::OPTION );
+            if ( is_array( $settings ) && isset( $settings['template_voucher'] ) && str_replace( "\r\n", "\n", $settings['template_voucher'] ) === WCR_Settings::LEGACY_VOUCHER ) {
+                $settings['template_voucher'] = WCR_Settings::DEFAULT_VOUCHER;
+                update_option( WCR_Settings::OPTION, $settings );
+            }
+        }
         if ( false === get_option( WCR_Settings::OPTION ) ) add_option( WCR_Settings::OPTION, WCR_Settings::defaults() );
         // The customer list is built from existing orders in the background (Action Scheduler), started on 'init'.
         if ( false === get_option( 'wcr_rebuild' ) ) update_option( 'wcr_needs_rebuild', 1, false );
