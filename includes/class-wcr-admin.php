@@ -44,8 +44,9 @@ class WCR_Admin {
         if ( false === strpos( $hook, self::PAGE ) ) return;
         wp_enqueue_style( 'wcr-admin', WCR_URL . 'assets/css/admin.css', array(), wcr_asset_ver( 'assets/css/admin.css' ) );
         if ( 'settings' === self::tab() ) {
+            if ( 'email' === self::section() ) wp_enqueue_media();
             wp_enqueue_script( 'wcr-settings', WCR_URL . 'assets/js/settings.js', array(), wcr_asset_ver( 'assets/js/settings.js' ), true );
-            wp_localize_script( 'wcr-settings', 'WCRSettings', array( 'sample' => self::sample_values() ) );
+            wp_localize_script( 'wcr-settings', 'WCRSettings', array( 'sample' => self::sample_values() + array( '{last_order_items}' => 'মেঘের ওপর বাড়ি' ), 'ajaxUrl' => admin_url( 'admin-ajax.php' ), 'nonce' => wp_create_nonce( 'wcr_admin' ) ) );
             return;
         }
         wp_enqueue_script( 'wcr-admin', WCR_URL . 'assets/js/admin.js', array(), wcr_asset_ver( 'assets/js/admin.js' ), true );
@@ -78,6 +79,21 @@ class WCR_Admin {
         if ( null === $status ) return ' <span class="wcr-warn">(order deleted since)</span>';
         if ( in_array( $status, WCR_Settings::counted_statuses(), true ) ) return '';
         return ' <span class="wcr-warn">(order now ' . esc_html( wc_get_order_status_name( $status ) ) . ')</span>';
+    }
+    // What WooCommerce Order Attribution recorded for an order: "whatsapp · messaging · winback (voucher)", or the
+    // source type (Direct, Organic, Referral ...) when it came another way. HPOS-safe (order meta via WC_Order).
+    private static function order_source( $order_id ) {
+        $order = $order_id ? wc_get_order( (int) $order_id ) : null;
+        if ( ! $order ) return '<span class="wcr-muted">—</span>';
+        $src = (string) $order->get_meta( '_wc_order_attribution_utm_source' );
+        if ( '' !== $src ) {
+            $parts = array_filter( array( $src, (string) $order->get_meta( '_wc_order_attribution_utm_medium' ), (string) $order->get_meta( '_wc_order_attribution_utm_campaign' ) ) );
+            $content = (string) $order->get_meta( '_wc_order_attribution_utm_content' );
+            return esc_html( implode( ' · ', $parts ) . ( '' !== $content ? ' (' . $content . ')' : '' ) );
+        }
+        $type = (string) $order->get_meta( '_wc_order_attribution_source_type' );
+        $labels = array( 'typein' => 'Direct', 'organic' => 'Organic search', 'referral' => 'Referral', 'utm' => 'Campaign', 'admin' => 'Created in admin', 'mobile_app' => 'Mobile app' );
+        return '' !== $type ? esc_html( $labels[ $type ] ?? ucfirst( $type ) ) : '<span class="wcr-muted">Not recorded</span>';
     }
     private static function user_name( $user_id ) {
         static $names = array();
@@ -201,11 +217,11 @@ class WCR_Admin {
         $stats = self::link_stats( $rows ? wp_list_pluck( $rows, 'id' ) : array() );
         echo self::pagination( $total, $f['page'] );
         echo '<div class="wcr-table-scroll"><table class="widefat striped wcr-customers' . ( $vouchers ? ' has-vouchers' : '' ) . '"><thead><tr>';
-        echo self::sort_link( 'Customer', 'name', $f, 'column-primary' ) . '<th scope="col">WhatsApp / Phone</th><th scope="col">Last order</th>' . self::sort_link( 'Days since', 'days', $f, 'wcr-num' )
+        echo '<th scope="col" class="wcr-sn">#</th>' . self::sort_link( 'Customer', 'name', $f, 'column-primary' ) . '<th scope="col">WhatsApp / Phone</th><th scope="col">Last order</th>' . self::sort_link( 'Days since', 'days', $f, 'wcr-num' )
             . self::sort_link( 'Orders', 'orders', $f, 'wcr-num' ) . self::sort_link( 'Total spent', 'spent', $f, 'wcr-num' ) . self::sort_link( 'AOV', 'aov', $f, 'wcr-num' )
-            . '<th scope="col">Reminder status</th>' . ( $vouchers ? '<th scope="col" class="wcr-voucher-col">Voucher</th>' : '' ) . '<th scope="col" class="wcr-wa-col">WhatsApp</th><th scope="col" class="wcr-actions"><span class="screen-reader-text">History</span></th></tr></thead><tbody>';
-        if ( ! $rows ) echo '<tr><td colspan="11" class="wcr-empty">No customers match these filters.</td></tr>';
-        foreach ( $rows as $c ) echo self::row( $c, $coupons[ (int) $c->id ] ?? null, $stats[ (int) $c->id ] ?? null );
+            . '<th scope="col">Reminder status</th>' . ( $vouchers ? '<th scope="col" class="wcr-voucher-col">Voucher</th>' : '' ) . '<th scope="col" class="wcr-wa-col">Contact</th><th scope="col" class="wcr-actions"><span class="screen-reader-text">History</span></th></tr></thead><tbody>';
+        if ( ! $rows ) echo '<tr><td colspan="12" class="wcr-empty">No customers match these filters.</td></tr>';
+        foreach ( $rows as $i => $c ) echo self::row( $c, $coupons[ (int) $c->id ] ?? null, $stats[ (int) $c->id ] ?? null, ( $f['page'] - 1 ) * $f['per'] + $i + 1 );
         echo '</tbody></table></div>';
         echo self::pagination( $total, $f['page'] );
         echo '<p class="description wcr-footnote">Statistics count orders with status: ' . esc_html( implode( ', ', array_map( 'wc_get_order_status_name', WCR_Settings::counted_statuses() ) ) ) . ', net of refunds. WhatsApp buttons and Add Voucher appear for customers who are Eligible or Follow-up due. "Contacted" means WhatsApp was opened with the message; this plugin cannot see whether it was sent, delivered or read.</p>';
@@ -234,14 +250,14 @@ class WCR_Admin {
             . '<div class="wcr-dialog__footer"><button type="button" class="button wcr-dialog__cancel">Cancel</button> <button type="submit" class="button button-primary">Create voucher</button></div>'
             . '</form></dialog>';
     }
-    private static function row( $c, $coupon, $stat ) {
+    private static function row( $c, $coupon, $stat, $n ) {
         $id = (int) $c->id;
         $days = WCR_Customers::days_since( $c->last_order_at );
         $count = max( 1, (int) $c->order_count );
         $type = $c->user_id ? '<span class="wcr-ctype wcr-ctype--account">Registered</span>' : '<span class="wcr-ctype">Guest</span>';
         $phone = '' !== $c->wa_number ? '<span class="wcr-wa-number">' . esc_html( WCR_WhatsApp::display_number( $c->wa_number ) ) . '</span>' : '<span class="wcr-warn">No valid WhatsApp number</span>';
         if ( $c->phone && preg_replace( '/\D/', '', $c->phone ) !== $c->wa_number ) $phone .= '<br><small class="wcr-muted">' . esc_html( $c->phone ) . '</small>';
-        return '<tr data-row="' . $id . '">'
+        return '<tr data-row="' . $id . '"><td class="wcr-sn">' . esc_html( number_format_i18n( $n ) ) . '</td>'
             . '<td class="column-primary"><strong>' . esc_html( $c->name ? $c->name : '—' ) . '</strong> ' . $type . ( $c->email ? '<br><small class="wcr-muted">' . esc_html( $c->email ) . '</small>' : '' ) . '</td>'
             . '<td>' . $phone . '</td>'
             . '<td>' . self::order_link( $c->last_order_id ) . '<br><small>' . self::date_html( $c->last_order_at ) . '</small></td>'
@@ -268,7 +284,7 @@ class WCR_Admin {
         }
         if ( 'open_order' === $c->state ) $lines[] = 'Order ' . self::order_link( $c->open_order_id ) . ' is ' . esc_html( wc_get_order_status_name( $c->open_order_status ) );
         if ( $c->last_contact_at ) {
-            $l = 'WhatsApp opened ' . self::ago( $c->last_contact_at );
+            $l = ( 'email' === $c->last_contact_channel ? 'Email sent ' : 'WhatsApp opened ' ) . self::ago( $c->last_contact_at );
             if ( $c->last_contact_by ) $l .= ' by ' . self::user_name( $c->last_contact_by );
             if ( (int) $c->cycle_contacts > 1 ) $l .= ' (' . (int) $c->cycle_contacts . '×)';
             if ( 'contacted' !== $c->state ) $l .= (int) $c->cycle_voucher ? ' · with voucher' : ' · without voucher';
@@ -276,24 +292,35 @@ class WCR_Admin {
             if ( $stat && (int) $stat->links ) $lines[] = '<span class="wcr-open-state' . ( (int) $stat->opens ? ' is-opened' : '' ) . '">' . esc_html( (int) $stat->opens ? sprintf( 'Offer link opened %d× · last %s', $stat->opens, self::ago( $stat->last_open ) ) : 'Offer link not opened yet' ) . '</span>';
         }
         if ( $c->last_converted_order_id && (int) $c->last_converted_order_id === (int) $c->last_order_id ) $lines[] = '<span class="wcr-converted">✓ Ordered after reminder</span>';
+        if ( (int) $c->dnc_email ) $lines[] = '<span class="wcr-muted">Unsubscribed from email</span>';
         $html = '<div class="wcr-status-cell" data-status-cell="' . (int) $c->id . '">' . self::badge( $c->state, self::state_label( $c ) );
         if ( $lines ) $html .= '<small class="wcr-status-lines">' . implode( '<br>', $lines ) . '</small>';
-        if ( $c->last_contact_at && strtotime( $c->last_contact_at . ' UTC' ) > time() - WCR_WhatsApp::UNDO_HOURS * HOUR_IN_SECONDS ) {
+        // Only a WhatsApp contact can be undone (the admin may not have pressed Send); an email has really been sent.
+        if ( $c->last_contact_at && 'email' !== $c->last_contact_channel && strtotime( $c->last_contact_at . ' UTC' ) > time() - WCR_WhatsApp::UNDO_HOURS * HOUR_IN_SECONDS ) {
             $html .= '<button type="button" class="button-link wcr-undo" data-id="' . (int) $c->id . '">Not sent? Undo</button>';
         }
         return $html . '</div>';
     }
-    // WhatsApp buttons only for customers who are due (Eligible / Follow-up due); the status column says why not.
-    // [WhatsApp + Voucher] only once the customer has a valid voucher.
+    // Due now and reachable by WhatsApp or email.
+    private static function reachable( $c ) { return WCR_WhatsApp::is_due( $c ) || WCR_Email::is_due( $c ); }
+    // Contact buttons only for customers who are due (Eligible / Follow-up due); the status column says why not.
+    // WhatsApp needs a valid number, email a subscribed address; the "+ Voucher" buttons need a valid voucher.
     public static function wa_cell( $c, $coupon ) {
         $id = (int) $c->id;
         $html = '<div class="wcr-wa-cell" data-wa-cell="' . $id . '">';
-        if ( ! WCR_WhatsApp::is_due( $c ) ) return $html . '<span class="wcr-muted">—</span></div>';
-        $html .= '<div class="wcr-wa-buttons"><button type="button" class="button button-small wcr-wa" data-type="plain" data-id="' . $id . '" title="' . esc_attr( 'Open WhatsApp with the reminder message for ' . WCR_WhatsApp::display_number( $c->wa_number ) ) . '">' . self::WA_ICON . '<span>WhatsApp</span></button>';
-        if ( WCR_Coupons::enabled() && WCR_Coupons::is_usable( $coupon ) ) {
-            $html .= '<button type="button" class="button button-small wcr-wa wcr-wa--voucher" data-type="voucher" data-id="' . $id . '" title="' . esc_attr( sprintf( 'Open WhatsApp with voucher %s', $coupon->code ) ) . '">' . self::WA_ICON . '<span>WhatsApp + Voucher</span></button>';
+        $voucher = WCR_Coupons::enabled() && WCR_Coupons::is_usable( $coupon );
+        $buttons = '';
+        if ( WCR_WhatsApp::is_due( $c ) ) {
+            $buttons .= '<div class="wcr-wa-buttons"><button type="button" class="button button-small wcr-wa" data-type="plain" data-id="' . $id . '" title="' . esc_attr( 'Open WhatsApp with the reminder message for ' . WCR_WhatsApp::display_number( $c->wa_number ) ) . '">' . self::WA_ICON . '<span>WhatsApp</span></button>';
+            if ( $voucher ) $buttons .= '<button type="button" class="button button-small wcr-wa wcr-wa--voucher" data-type="voucher" data-id="' . $id . '" title="' . esc_attr( sprintf( 'Open WhatsApp with voucher %s', $coupon->code ) ) . '">' . self::WA_ICON . '<span>WhatsApp + Voucher</span></button>';
+            $buttons .= '</div>';
         }
-        return $html . '</div></div>';
+        if ( WCR_Email::is_due( $c ) ) {
+            $buttons .= '<div class="wcr-wa-buttons wcr-email-buttons"><button type="button" class="button button-small wcr-email" data-type="plain" data-id="' . $id . '" data-to="' . esc_attr( $c->email ) . '" title="' . esc_attr( 'Send the reminder email to ' . $c->email ) . '"><span class="dashicons dashicons-email-alt" aria-hidden="true"></span><span>Email</span></button>';
+            if ( $voucher ) $buttons .= '<button type="button" class="button button-small wcr-email wcr-email--voucher" data-type="voucher" data-id="' . $id . '" data-to="' . esc_attr( $c->email ) . '" data-code="' . esc_attr( $coupon->code ) . '" title="' . esc_attr( sprintf( 'Send voucher %1$s by email to %2$s', $coupon->code, $c->email ) ) . '"><span class="dashicons dashicons-email-alt" aria-hidden="true"></span><span>Email + Voucher</span></button>';
+            $buttons .= '</div>';
+        }
+        return $html . ( '' !== $buttons ? $buttons : '<span class="wcr-muted">—</span>' ) . '</div>';
     }
     // The customer's current voucher (code, status, terms, Revoke), or [Add Voucher] when they are due.
     public static function voucher_cell( $c, $coupon ) {
@@ -304,7 +331,7 @@ class WCR_Admin {
             $html .= '<code class="wcr-code">' . esc_html( $coupon->code ) . '</code> ' . self::badge( 'coupon-' . $st, WCR_Coupons::STATUSES[ $st ] ?? ucfirst( $st ) )
                 . '<small class="wcr-voucher-note">' . esc_html( WCR_Coupons::terms_label( $coupon ) ) . '</small>';
             if ( WCR_Coupons::is_usable( $coupon ) ) $html .= '<button type="button" class="button-link wcr-voucher-revoke" data-id="' . $id . '" data-code="' . esc_attr( $coupon->code ) . '">Revoke</button>';
-        } elseif ( WCR_WhatsApp::is_due( $c ) ) {
+        } elseif ( self::reachable( $c ) ) {
             $html .= '<button type="button" class="button button-small wcr-voucher-add" data-id="' . $id . '" data-name="' . esc_attr( $c->name ? $c->name : 'this customer' ) . '" aria-haspopup="dialog">Add Voucher</button>';
         } else {
             $html .= '<span class="wcr-muted">—</span>';
@@ -332,7 +359,7 @@ class WCR_Admin {
         $dl = array(
             'WhatsApp'      => '' !== $c->wa_number ? esc_html( WCR_WhatsApp::display_number( $c->wa_number ) ) : '<span class="wcr-warn">No valid number</span>',
             'Phone'         => esc_html( $c->phone ? $c->phone : '—' ),
-            'Email'         => esc_html( $c->email ? $c->email : '—' ),
+            'Email'         => esc_html( $c->email ? $c->email : '—' ) . ( (int) $c->dnc_email ? ' <span class="wcr-warn">(unsubscribed ' . self::date_html( $c->dnc_email_at ) . ')</span>' : '' ),
             'Customer type' => $c->user_id ? 'Registered (user #' . (int) $c->user_id . ')' : 'Guest',
             'Orders'        => esc_html( number_format_i18n( (int) $c->order_count ) ) . ' · ' . self::price( $c->total_value ) . ' total · ' . self::price( (float) $c->total_value / $count ) . ' AOV',
             'First order'   => self::date_html( $c->first_order_at ),
@@ -360,11 +387,12 @@ class WCR_Admin {
                 case 'converted': $status = self::badge( 'converted', 'Converted' ) . '<br><small>Order ' . self::order_link( $k->order_id ) . ' · ' . self::price( $k->order_value ) . ( (int) $k->coupon_used ? ' · used the voucher' : '' ) . self::order_ended( $k->order_status ) . '</small>'; break;
                 case 'closed': $status = self::badge( 'closed', 'Closed' ) . ( $k->order_id ? '<br><small>Cycle ended with order ' . self::order_link( $k->order_id ) . ', not attributed to this reminder</small>' : '' ); break;
                 case 'undone': $status = self::badge( 'undone', 'Not sent (undone)' ); break;
+                case 'failed': $status = self::badge( 'dnc', 'Email failed' ) . ( $k->error ? '<br><small>' . esc_html( $k->error ) . '</small>' : '' ); break;
                 default: $status = self::badge( 'contacted', 'Contacted' ) . '<br><small>Waiting for an order</small>';
             }
             $html .= '<tr><td>' . self::date_html( $k->created_at, true ) . ( $k->created_by ? '<br><small class="wcr-muted">by ' . esc_html( self::user_name( $k->created_by ) ) . '</small>' : '' ) . '</td>'
-                . '<td>' . ( 'voucher' === $k->type ? 'With voucher' : 'Without voucher' ) . '</td><td>' . $voucher . '</td><td>' . $link . '</td><td>' . $status . '</td></tr>';
-            if ( $k->message ) $html .= '<tr class="wcr-msg-row"><td colspan="5"><details><summary>Message</summary><div class="wcr-wa-bubble">' . esc_html( $k->message ) . '</div></details></td></tr>';
+                . '<td>' . ( 'email' === $k->channel ? 'Email' : 'WhatsApp' ) . '<br><small class="wcr-muted">' . ( 'voucher' === $k->type ? 'with voucher' : 'without voucher' ) . '</small>' . '</td><td>' . $voucher . '</td><td>' . $link . '</td><td>' . $status . '</td></tr>';
+            if ( $k->message ) $html .= '<tr class="wcr-msg-row"><td colspan="5"><details><summary>' . ( 'email' === $k->channel ? 'Email to ' . esc_html( $k->email_to ) . ': ' . esc_html( $k->subject ) : 'Message' ) . '</summary><div class="wcr-wa-bubble">' . esc_html( $k->message ) . '</div></details></td></tr>';
         }
         return $html . '</tbody></table></div>' . self::vouchers_html( $c );
     }
@@ -408,7 +436,7 @@ class WCR_Admin {
         self::guard();
         $c = self::customer_or_fail();
         if ( ! WCR_Coupons::enabled() ) wp_send_json_error( array( 'message' => 'Vouchers are turned off in the settings.' ), 400 );
-        if ( ! WCR_WhatsApp::is_due( $c ) ) wp_send_json_error( array( 'message' => 'Vouchers can only be added for customers who are Eligible or Follow-up due. Reload the page to see their current status.' ), 409 );
+        if ( ! self::reachable( $c ) ) wp_send_json_error( array( 'message' => 'Vouchers can only be added for customers who are Eligible or Follow-up due. Reload the page to see their current status.' ), 409 );
         $config = WCR_Coupons::clean_config( $_POST );
         if ( is_wp_error( $config ) ) wp_send_json_error( array( 'message' => $config->get_error_message() ), 400 );
         $row = WCR_Coupons::create( $c, $config );
@@ -433,8 +461,10 @@ class WCR_Admin {
         $in = implode( ',', array_map( function ( $v ) use ( $wpdb ) { return $wpdb->prepare( '%s', $v ); }, WCR_Settings::counted_statuses() ) );
         $sum = $wpdb->get_row( "SELECT COUNT(*) AS sent, COALESCE(SUM(k.status='converted'),0) AS converted, COALESCE(SUM(k.status='contacted'),0) AS waiting,
             COALESCE(SUM(k.type='voucher'),0) AS sent_v, COALESCE(SUM(k.type='voucher' AND k.status='converted'),0) AS conv_v, COALESCE(SUM(k.coupon_used),0) AS coupon_used,
+            COALESCE(SUM(k.channel='whatsapp'),0) AS sent_wa, COALESCE(SUM(k.channel='whatsapp' AND k.status='converted'),0) AS conv_wa,
+            COALESCE(SUM(k.channel='email'),0) AS sent_em, COALESCE(SUM(k.channel='email' AND k.status='converted'),0) AS conv_em,
             COALESCE(SUM(CASE WHEN k.status='converted' AND o.status IN ($in) THEN o.net_total END),0) AS revenue
-            FROM $kt k LEFT JOIN $ot o ON o.order_id=k.order_id WHERE k.status<>'undone'" );
+            FROM $kt k LEFT JOIN $ot o ON o.order_id=k.order_id WHERE k.status NOT IN ('undone','failed')" );
         $rate = function ( $part, $all ) { return $all ? round( 100 * $part / $all, 1 ) . '%' : '—'; };
         $s = WCR_Settings::get();
         $cards = array(
@@ -442,21 +472,23 @@ class WCR_Admin {
             array( 'Converted', number_format_i18n( $sum->converted ), $rate( $sum->converted, $sum->sent ) . ' of reminders' ),
             array( 'With voucher', $rate( $sum->conv_v, $sum->sent_v ), sprintf( '%s of %s converted', number_format_i18n( $sum->conv_v ), number_format_i18n( $sum->sent_v ) ) ),
             array( 'Without voucher', $rate( $sum->converted - $sum->conv_v, $sum->sent - $sum->sent_v ), sprintf( '%s of %s converted', number_format_i18n( $sum->converted - $sum->conv_v ), number_format_i18n( $sum->sent - $sum->sent_v ) ) ),
+            array( 'By WhatsApp', $rate( $sum->conv_wa, $sum->sent_wa ), sprintf( '%s of %s converted', number_format_i18n( $sum->conv_wa ), number_format_i18n( $sum->sent_wa ) ) ),
+            array( 'By email', $rate( $sum->conv_em, $sum->sent_em ), sprintf( '%s of %s converted', number_format_i18n( $sum->conv_em ), number_format_i18n( $sum->sent_em ) ) ),
             array( 'Revenue from converted orders', wp_strip_all_tags( wc_price( $sum->revenue ) ), sprintf( '%s orders used the voucher', number_format_i18n( $sum->coupon_used ) ) ),
         );
         echo '<div class="wcr-cards">';
         foreach ( $cards as $card ) echo '<div class="wcr-card"><span class="wcr-card__label">' . esc_html( $card[0] ) . '</span><span class="wcr-card__value">' . esc_html( $card[1] ) . '</span><span class="wcr-card__note">' . esc_html( $card[2] ) . '</span></div>';
-        echo '</div><p class="description">A reminder converts when the customer places a new counted order within ' . esc_html( (int) $s['attribution_days'] ) . ' days after it, or uses its voucher. Undone reminders are not counted.</p>';
+        echo '</div><p class="description">A reminder converts when the customer places a new counted order within ' . esc_html( (int) $s['attribution_days'] ) . ' days after it, or uses its voucher. Undone reminders and failed emails are not counted. <em>Order source</em> is what WooCommerce&#8217;s Order Attribution recorded for the order (from the UTM tags on the offer link, when the customer came through it).</p>';
         $page = max( 1, absint( $_GET['paged'] ?? 1 ) );
         $total = (int) $wpdb->get_var( "SELECT COUNT(*) FROM $kt WHERE status='converted'" );
         $rows = $wpdb->get_results( $wpdb->prepare( "SELECT k.*, c.name, c.id AS cid, cp.code, o.status AS order_status FROM $kt k JOIN $ct c ON c.id=k.customer_id LEFT JOIN $cpt cp ON cp.id=k.coupon_id LEFT JOIN $ot o ON o.order_id=k.order_id WHERE k.status='converted' ORDER BY k.converted_at DESC, k.id DESC LIMIT %d, %d", ( $page - 1 ) * self::PER_PAGE, self::PER_PAGE ) );
         echo self::pagination( $total, $page );
-        echo '<div class="wcr-table-scroll"><table class="widefat striped"><thead><tr><th>Customer</th><th>Reminder</th><th>Type</th><th>Voucher</th><th>New order</th><th class="wcr-num">Order value</th><th>Converted</th></tr></thead><tbody>';
-        if ( ! $rows ) echo '<tr><td colspan="7" class="wcr-empty">No converted reminders yet.</td></tr>';
+        echo '<div class="wcr-table-scroll"><table class="widefat striped"><thead><tr><th>Customer</th><th>Reminder</th><th>Channel</th><th>Voucher</th><th>New order</th><th>Order source</th><th class="wcr-num">Order value</th><th>Converted</th></tr></thead><tbody>';
+        if ( ! $rows ) echo '<tr><td colspan="8" class="wcr-empty">No converted reminders yet.</td></tr>';
         foreach ( $rows as $r ) {
-            echo '<tr><td>' . esc_html( $r->name ? $r->name : 'Customer #' . (int) $r->cid ) . '</td><td>' . self::date_html( $r->created_at ) . '</td><td>' . ( 'voucher' === $r->type ? 'With voucher' : 'Without voucher' ) . '</td>'
+            echo '<tr><td>' . esc_html( $r->name ? $r->name : 'Customer #' . (int) $r->cid ) . '</td><td>' . self::date_html( $r->created_at ) . '</td><td>' . ( 'email' === $r->channel ? 'Email' : 'WhatsApp' ) . '<br><small class="wcr-muted">' . ( 'voucher' === $r->type ? 'with voucher' : 'without voucher' ) . '</small></td>'
                 . '<td>' . ( $r->code ? '<code>' . esc_html( $r->code ) . '</code><br><small>' . ( (int) $r->coupon_used ? 'used in this order' : 'not used in this order' ) . '</small>' : '—' ) . '</td>'
-                . '<td>' . self::order_link( $r->order_id ) . self::order_ended( $r->order_status ) . '</td><td class="wcr-num">' . self::price( $r->order_value ) . '</td><td>' . self::date_html( $r->converted_at ) . '</td></tr>';
+                . '<td>' . self::order_link( $r->order_id ) . self::order_ended( $r->order_status ) . '</td><td>' . self::order_source( $r->order_id ) . '</td><td class="wcr-num">' . self::price( $r->order_value ) . '</td><td>' . self::date_html( $r->converted_at ) . '</td></tr>';
         }
         echo '</tbody></table></div>' . self::pagination( $total, $page );
     }
@@ -495,7 +527,55 @@ class WCR_Admin {
 
     // ---------------------------------------------------------------- Settings tab
 
-    const SECTIONS = array( 'general' => 'Reminders', 'messages' => 'Messages', 'voucher' => 'Voucher', 'data' => 'Privacy & data' );
+    const SECTIONS = array( 'general' => 'Reminders', 'messages' => 'WhatsApp messages', 'email' => 'Email', 'voucher' => 'Voucher', 'data' => 'Privacy & data' );
+    // Settings → Email: the fields (left) and a live preview with test sending (right).
+    private static function email_section( $s ) {
+        $text = function ( $key, $label, $desc = '', $type = 'text' ) use ( $s ) {
+            return '<tr><th scope="row"><label for="' . esc_attr( $key ) . '">' . esc_html( $label ) . '</label></th><td><input type="' . $type . '" id="' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '" class="large-text wcr-email-field" value="' . esc_attr( $s[ $key ] ) . '">' . ( $desc ? '<p class="description">' . $desc . '</p>' : '' ) . '</td></tr>';
+        };
+        $area = function ( $key, $label, $desc = '', $rows = 3 ) use ( $s ) {
+            return '<tr><th scope="row"><label for="' . esc_attr( $key ) . '">' . esc_html( $label ) . '</label></th><td><textarea id="' . esc_attr( $key ) . '" name="' . esc_attr( $key ) . '" rows="' . (int) $rows . '" class="large-text wcr-email-field">' . esc_textarea( $s[ $key ] ) . '</textarea>' . ( $desc ? '<p class="description">' . $desc . '</p>' : '' ) . '</td></tr>';
+        };
+        $color = function ( $key, $label ) use ( $s ) {
+            return '<label class="wcr-color"><input type="color" name="' . esc_attr( $key ) . '" class="wcr-email-field" value="' . esc_attr( $s[ $key ] ) . '"> ' . esc_html( $label ) . '</label>';
+        };
+        $logo = WCR_Email::logo_url( $s );
+        $ph = '';
+        foreach ( array_keys( WCR_WhatsApp::PLACEHOLDERS ) as $p ) $ph .= '<code>' . esc_html( $p ) . '</code> ';
+        echo '</table><div class="wcr-email-layout"><div class="wcr-email-fields"><table class="form-table" role="presentation">';
+        echo '<tr><th scope="row">Emails</th><td><label><input type="checkbox" name="email_enabled" value="1" ' . checked( ! empty( $s['email_enabled'] ), true, false ) . '> Show <em>Email</em> and <em>Email + Voucher</em> buttons for customers with an email address</label><p class="description">Each email is sent by WordPress (<code>wp_mail</code>) through your site&#8217;s mail setup; an SMTP plugin is recommended. An email is a contact in the same reminder cycle as WhatsApp. Customers who unsubscribe get no more emails.</p></td></tr>';
+        echo $text( 'email_from_name', 'From name', 'Empty = WordPress / your SMTP plugin decides.' ) . $text( 'email_from_address', 'From address', 'Use an address on your own domain so the email is not marked as spam.', 'email' ) . $text( 'email_reply_to', 'Reply-To', 'Where customer replies go (optional).', 'email' );
+        echo '<tr><th scope="row">Logo</th><td><input type="hidden" name="email_logo_id" id="email_logo_id" class="wcr-email-field" value="' . esc_attr( (int) $s['email_logo_id'] ) . '"><img id="wcr-logo-preview" src="' . esc_url( $logo ) . '" alt="" class="wcr-logo-preview"' . ( $logo ? '' : ' hidden' ) . '> <button type="button" class="button wcr-logo-pick">Choose logo</button> <button type="button" class="button-link wcr-logo-clear">Use site logo</button><p class="description">Without a choice here, the site logo (Appearance → Customize) is used; without that, the site name.</p></td></tr>';
+        echo '<tr><th scope="row">Colours</th><td class="wcr-colors">' . $color( 'email_header_bg', 'Header' ) . $color( 'email_primary', 'Headings & button' ) . $color( 'email_voucher_color', 'Voucher' ) . $color( 'email_footer_bg', 'Footer' ) . '</td></tr>';
+        echo '<tr><td colspan="2" class="wcr-settings-sub"><strong>Texts</strong><p class="description">Placeholders: ' . $ph . '<code>{last_order_items}</code>. A voucher line whose placeholder is empty (e.g. no minimum spend, no end date) is left out.</p></td></tr>';
+        echo $text( 'email_subject_plain', 'Subject (without voucher)' ) . $text( 'email_subject_voucher', 'Subject (with voucher)' ) . $text( 'email_greeting', 'Greeting' ) . $area( 'email_intro', 'Intro' );
+        echo $text( 'email_last_order_label', 'Last order label', 'Shown with the products of the customer&#8217;s last order. Empty = no last-order box.' ) . $text( 'email_last_order_note', 'Last order note' );
+        echo $area( 'email_body_plain', 'Main text (without voucher)' ) . $area( 'email_body_voucher', 'Main text (with voucher)' );
+        echo $text( 'email_voucher_title', 'Voucher title' ) . $text( 'email_voucher_line', 'Voucher line' ) . $area( 'email_voucher_terms', 'Voucher terms', 'One per line, under the code.', 2 );
+        echo $area( 'email_closing', 'Closing text' ) . $text( 'email_highlight', 'Highlighted line' ) . $text( 'email_button', 'Button', 'The button opens the customer&#8217;s personal offer link (<code>{offer_url}</code>): opens are counted and the voucher is applied.' );
+        echo $area( 'email_signoff', 'Sign-off', '', 2 ) . $text( 'email_team', 'Team name' );
+        echo '<tr><td colspan="2" class="wcr-settings-sub"><strong>Footer</strong></td></tr>';
+        echo $text( 'email_facebook', 'Facebook URL', '', 'url' ) . $text( 'email_instagram', 'Instagram URL', '', 'url' ) . $text( 'email_youtube', 'YouTube URL', '', 'url' );
+        echo $text( 'email_footer_name', 'Store name' ) . $text( 'email_footer_tagline', 'Tagline' ) . $area( 'email_footer_address', 'Address', '', 2 ) . $area( 'email_footer_reason', 'Why they get this email', '', 2 ) . $text( 'email_unsub_label', 'Unsubscribe link text', 'Every email has an unsubscribe link; it marks the customer &#8220;Unsubscribed from email&#8221; (WhatsApp is not affected).' );
+        // Inputs of the test box have no name (or a wcr_test_ name), so saving the settings ignores them.
+        $last_to = (string) get_user_meta( get_current_user_id(), WCR_Email::TEST_META, true );
+        echo '</table></div><div class="wcr-email-preview">'
+            . '<div class="wcr-test-box"><h3>Send a test email</h3>'
+            . '<p><label for="wcr-test-to">To</label><input type="text" id="wcr-test-to" class="wcr-test-input" value="' . esc_attr( '' !== $last_to ? $last_to : wp_get_current_user()->user_email ) . '" placeholder="you@example.com, colleague@example.com" autocomplete="off"><span class="description">Up to ' . (int) WCR_Email::TEST_MAX_RECIPIENTS . ' addresses, separated by commas.</span></p>'
+            . '<fieldset class="wcr-test-type"><legend>Version</legend><label><input type="radio" name="wcr_test_type" value="voucher" checked> With voucher</label> <label><input type="radio" name="wcr_test_type" value="plain"> Without voucher</label></fieldset>'
+            . '<div class="wcr-test-customer"><label for="wcr-test-customer-q">Customer data <span class="description">(optional)</span></label>'
+            . '<input type="search" id="wcr-test-customer-q" class="wcr-test-input" placeholder="Search a customer by name, phone or email" autocomplete="off" aria-controls="wcr-test-customer-results">'
+            . '<ul id="wcr-test-customer-results" class="wcr-test-results" role="listbox" hidden></ul>'
+            . '<p id="wcr-test-customer-chosen" class="wcr-test-chosen" hidden>Using <strong></strong> <button type="button" class="button-link wcr-test-customer-clear">Use the sample customer</button></p>'
+            . '<input type="hidden" id="wcr-test-customer-id" value="0"><p class="description">Their real name, last-order product and order details fill the email. The email still goes only to the addresses above, never to the customer.</p></div>'
+            . '<p class="wcr-test-actions"><button type="button" class="button button-primary wcr-email-test-send">Send test email</button> <span id="wcr-test-result" class="wcr-test-result" role="status" aria-live="polite"></span></p>'
+            . '<p class="description">Sends the format as it is now, unsaved changes included, with <strong>[Test]</strong> before the subject. It uses a sample voucher code; nothing is recorded and no voucher is created. The button and unsubscribe links in a test email are test links.</p></div>'
+            . '<div class="wcr-email-preview__bar"><span class="wcr-preview__label">Preview</span>'
+            . '<span class="wcr-seg"><button type="button" class="button button-small is-active" data-preview-type="voucher">With voucher</button><button type="button" class="button button-small" data-preview-type="plain">Without voucher</button></span></div>'
+            . '<p class="wcr-email-subject"><strong>Subject:</strong> <span id="wcr-email-subject"></span></p>'
+            . '<iframe id="wcr-email-frame" title="Email preview" sandbox="allow-same-origin"></iframe>'
+            . '</div></div><table class="form-table" role="presentation">';
+    }
     private static function section() {
         $section = sanitize_key( $_GET['section'] ?? '' );
         return isset( self::SECTIONS[ $section ] ) ? $section : 'general';
@@ -536,6 +616,8 @@ class WCR_Admin {
             echo '<tr><th scope="row"><label for="wcr-cc">Default country code</label></th><td><span class="wcr-cc-prefix">+</span><input type="text" id="wcr-cc" name="country_code" value="' . esc_attr( $s['country_code'] ) . '" class="small-text" inputmode="numeric" pattern="[0-9]{1,4}" maxlength="4"><p class="description">For phone numbers without a country code, unless the order has a billing country (e.g. <code>01712345678</code> becomes <code>+8801712345678</code>). Changing it rebuilds the customer list.</p></td></tr>';
             echo '<tr><th scope="row">Offer link opens</th><td><label><input type="radio" name="offer_destination" value="shop" ' . checked( $s['offer_destination'], 'shop', false ) . '> Shop page</label><br><label><input type="radio" name="offer_destination" value="home" ' . checked( $s['offer_destination'], 'home', false ) . '> Home page</label><p class="description">Where <code>{offer_url}</code> takes the customer. Opening it applies their voucher to the cart automatically.</p></td></tr>';
             echo '<tr><th scope="row">Offer popup</th><td><label><input type="checkbox" name="offer_popup" value="1" ' . checked( ! empty( $s['offer_popup'] ), true, false ) . '> When a customer opens a voucher link, show a popup with their code (and a Copy button), the terms and, if their cart has items, the discount and new total</label><p class="description">Not shown for reminders without a voucher. Works with page-cache plugins: the popup is loaded separately for that one visitor, never stored in a cached page.</p></td></tr>';
+            echo '<tr><th scope="row"><label for="wcr-utm">Order source (UTM)</label></th><td><label><input type="checkbox" name="utm_enabled" value="1" ' . checked( ! empty( $s['utm_enabled'] ), true, false ) . '> Add UTM tags to the page the offer link opens</label><p><label>Campaign <input type="text" id="wcr-utm" name="utm_campaign" class="regular-text" value="' . esc_attr( $s['utm_campaign'] ) . '"></label></p>'
+                . '<p class="description">Adds <code>utm_source=whatsapp</code> or <code>email</code>, <code>utm_medium=messaging</code> or <code>email</code>, <code>utm_campaign</code> (above) and <code>utm_content=voucher</code> or <code>reminder</code>. WooCommerce&#8217;s <em>Order Attribution</em> (WooCommerce → Settings → Advanced → Features) records them on the order, shown as <em>Origin</em> on the order screen, in WooCommerce reports, and in the Conversions tab here.</p></td></tr>';
         } elseif ( 'messages' === $section ) {
             echo '<tr><th scope="row"><label for="wcr-tpl-plain">Without voucher</label></th><td><textarea id="wcr-tpl-plain" class="large-text wcr-template" data-preview="wcr-prev-plain" name="template_plain" rows="7" maxlength="2000">' . esc_textarea( $s['template_plain'] ) . '</textarea>' . self::chips( 'wcr-tpl-plain' ) . '<div class="wcr-preview"><span class="wcr-preview__label">Preview with sample data</span><div class="wcr-wa-bubble" id="wcr-prev-plain" aria-live="polite"></div></div></td></tr>';
             echo '<tr><th scope="row"><label for="wcr-tpl-voucher">With voucher</label></th><td><textarea id="wcr-tpl-voucher" class="large-text wcr-template" data-preview="wcr-prev-voucher" name="template_voucher" rows="7" maxlength="2000">' . esc_textarea( $s['template_voucher'] ) . '</textarea>' . self::chips( 'wcr-tpl-voucher' ) . '<div class="wcr-preview"><span class="wcr-preview__label">Preview with sample data</span><div class="wcr-wa-bubble" id="wcr-prev-voucher" aria-live="polite"></div></div><p class="description">Voucher placeholders are empty in the message without a voucher. <code>{offer_url}</code> is a personal link: it shows you whether the customer opened it, and applies their voucher to the cart.</p></td></tr>';
@@ -546,10 +628,12 @@ class WCR_Admin {
             echo '<tr><th scope="row"><label for="wcr-amount">Discount amount</label></th><td><input type="number" id="wcr-amount" name="coupon_amount" min="0" step="any" class="small-text" value="' . esc_attr( $s['coupon_amount'] ) . '"><p class="description">Percent, or an amount in ' . esc_html( get_woocommerce_currency() ) . ' for a fixed discount.</p></td></tr>';
             echo '<tr><th scope="row"><label for="wcr-min">Minimum spend</label></th><td><input type="number" id="wcr-min" name="coupon_min_spend" min="0" step="any" class="small-text" value="' . esc_attr( $s['coupon_min_spend'] ) . '"> <span class="description">Leave empty for none.</span></td></tr>';
             echo '<tr class="wcr-max-row"><th scope="row"><label for="wcr-max">Maximum discount</label></th><td><input type="number" id="wcr-max" name="coupon_max_discount" min="0" step="any" class="small-text" value="' . esc_attr( $s['coupon_max_discount'] ) . '"> <span class="description">Percentage vouchers only. Leave empty for no cap.</span></td></tr>';
-            echo '<tr><th scope="row"><label for="wcr-exp">Valid for</label></th><td><input type="number" id="wcr-exp" name="coupon_expiry_days" min="0" max="365" class="small-text" placeholder="No end date" value="' . esc_attr( (int) $s['coupon_expiry_days'] ? (int) $s['coupon_expiry_days'] : '' ) . '"> days after it is sent<p class="description">Counted from the day the voucher is first sent by WhatsApp, until the end of the last day (store time): sent on 5 October with 7 days = valid until the end of 12 October. Sending it again does not extend it. Empty or 0 = no end date.</p><p class="description wcr-warn-text">A voucher with no end date and usage limit 0 never closes; set at least one of them.</p></td></tr>';
+            echo '<tr><th scope="row"><label for="wcr-exp">Valid for</label></th><td><input type="number" id="wcr-exp" name="coupon_expiry_days" min="0" max="365" class="small-text" placeholder="No end date" value="' . esc_attr( (int) $s['coupon_expiry_days'] ? (int) $s['coupon_expiry_days'] : '' ) . '"> days after it is sent<p class="description">Counted from the day the voucher is first sent (WhatsApp or email), until the end of the last day (store time): sent on 5 October with 7 days = valid until the end of 12 October. Sending it again does not extend it. Empty or 0 = no end date.</p><p class="description wcr-warn-text">A voucher with no end date and usage limit 0 never closes; set at least one of them.</p></td></tr>';
             echo '<tr><th scope="row"><label for="wcr-prefix">Code prefix</label></th><td><input type="text" id="wcr-prefix" name="coupon_prefix" maxlength="10" class="small-text" value="' . esc_attr( $s['coupon_prefix'] ) . '"> <label><input type="checkbox" name="coupon_name_in_code" value="1" ' . checked( ! empty( $s['coupon_name_in_code'] ), true, false ) . '> Include the customer&#8217;s first name</label><p class="description">Code = prefix + first name + discount + 4 random characters, e.g. <code>RAHIM10X7KQ</code>. Letters A–Z and digits only.</p></td></tr>';
             echo '<tr><th scope="row"><label for="wcr-limit">Usage limit</label></th><td><input type="number" id="wcr-limit" name="coupon_usage_limit" min="0" max="100" class="small-text" value="' . esc_attr( $s['coupon_usage_limit'] ) . '"> <span class="description">times in total (0 = unlimited until it expires).</span></td></tr>';
             echo '<tr><th scope="row">Restrictions</th><td><label><input type="checkbox" name="coupon_individual" value="1" ' . checked( ! empty( $s['coupon_individual'] ), true, false ) . '> Individual use only (cannot be combined with other coupons)</label><br><label><input type="checkbox" name="coupon_restrict_email" value="1" ' . checked( ! empty( $s['coupon_restrict_email'] ), true, false ) . '> Only for the customer&#8217;s billing email</label><p class="description">The email restriction applies only to customers with an email, and they must check out with that email.</p></td></tr>';
+        } elseif ( 'email' === $section ) {
+            self::email_section( $s );
         } else {
             echo '<tr><th scope="row"><label for="wcr-ret">Keep reminder history</label></th><td><input type="number" id="wcr-ret" name="log_retention_days" min="0" max="3650" class="small-text" value="' . esc_attr( $s['log_retention_days'] ) . '"> days <span class="description">(0 = keep forever)</span><p class="description">Older reminder records (including the message text) are deleted daily. Customer statistics are not affected.</p></td></tr>';
             echo '<tr><th scope="row">Uninstall</th><td><label><input type="checkbox" name="delete_on_uninstall" value="1" ' . checked( ! empty( $s['delete_on_uninstall'] ), true, false ) . '> Delete all plugin data when the plugin is deleted</label><p class="description">Customer statistics, reminder history, voucher records and settings. WooCommerce coupons already created stay in WooCommerce.</p></td></tr>';
@@ -591,6 +675,14 @@ class WCR_Admin {
             $s['country_code'] = '' !== $cc ? $cc : '880';
             $s['offer_destination'] = 'home' === ( $_POST['offer_destination'] ?? '' ) ? 'home' : 'shop';
             $s['offer_popup'] = empty( $_POST['offer_popup'] ) ? 0 : 1;
+            $s['utm_enabled'] = empty( $_POST['utm_enabled'] ) ? 0 : 1;
+            $campaign = substr( preg_replace( '/[^a-z0-9_-]/', '', strtolower( str_replace( ' ', '_', (string) wp_unslash( $_POST['utm_campaign'] ?? '' ) ) ) ), 0, 50 );
+            $s['utm_campaign'] = '' !== $campaign ? $campaign : 'winback';
+        } elseif ( 'email' === $section ) {
+            foreach ( array_keys( WCR_Email::defaults() ) as $key ) {
+                if ( 'email_enabled' === $key ) { $s[ $key ] = empty( $_POST[ $key ] ) ? 0 : 1; continue; }
+                if ( isset( $_POST[ $key ] ) ) $s[ $key ] = WCR_Email::clean_field( $key, wp_unslash( $_POST[ $key ] ) );
+            }
         } elseif ( 'messages' === $section ) {
             foreach ( array( 'template_plain' => WCR_Settings::DEFAULT_PLAIN, 'template_voucher' => WCR_Settings::DEFAULT_VOUCHER ) as $key => $default ) {
                 $t = isset( $_POST[ $key ] ) ? mb_substr( sanitize_textarea_field( wp_unslash( $_POST[ $key ] ) ), 0, 2000 ) : '';

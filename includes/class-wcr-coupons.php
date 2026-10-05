@@ -161,14 +161,26 @@ class WCR_Coupons {
         self::forget( $id );
         return self::get( $id );
     }
+    // End of the Nth day after today (store time): the end date a voucher gets when it is first sent today.
+    private static function end_if_sent_today( $row ) {
+        return ( new DateTimeImmutable( 'today', wp_timezone() ) )->modify( '+' . (int) $row->valid_days . ' days' )->setTime( 23, 59, 59 );
+    }
+    // The voucher as it will be once sent (end date filled in), without saving anything: for message texts that are
+    // built before the send succeeds (email).
+    public static function as_sent( $row ) {
+        $copy = clone $row;
+        if ( (int) $copy->valid_days && empty( $copy->expires_at ) ) $copy->expires_at = self::end_if_sent_today( $copy )->setTimezone( new DateTimeZone( 'UTC' ) )->format( 'Y-m-d H:i:s' );
+        return $copy;
+    }
     // First send: status Sent, and the validity period starts (end of the Nth day after today, store time).
     public static function mark_sent( $row ) {
         global $wpdb;
+        $row = self::get( $row->id ); // the saved record, not an as_sent() copy
         $now = current_time( 'mysql', true );
         $data = array( 'status' => 'sent' );
         if ( ! $row->sent_at ) $data['sent_at'] = $now;
         if ( (int) $row->valid_days && empty( $row->expires_at ) ) {
-            $end = ( new DateTimeImmutable( 'today', wp_timezone() ) )->modify( '+' . (int) $row->valid_days . ' days' )->setTime( 23, 59, 59 );
+            $end = self::end_if_sent_today( $row );
             $data['expires_at'] = $end->setTimezone( new DateTimeZone( 'UTC' ) )->format( 'Y-m-d H:i:s' );
             $coupon = new WC_Coupon( (int) $row->wc_coupon_id );
             if ( $coupon->get_id() ) { $coupon->set_date_expires( $end->getTimestamp() ); $coupon->save(); }

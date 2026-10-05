@@ -195,7 +195,7 @@ class WCR_Customers {
         if ( $last && ( null === $c->last_order_at || $last->created_at > $c->last_order_at ) ) {
             $winner = self::close_cycle( $c, $last );
             WCR_Coupons::on_new_cycle( (int) $c->id );
-            $data += array( 'last_contact_at' => null, 'last_contact_by' => null, 'last_contact_type' => null, 'cycle_contacts' => 0, 'cycle_voucher' => 0 );
+            $data += array( 'last_contact_at' => null, 'last_contact_by' => null, 'last_contact_type' => null, 'last_contact_channel' => null, 'cycle_contacts' => 0, 'cycle_voucher' => 0 );
             if ( $winner ) $data += array( 'conversions' => (int) $c->conversions + 1, 'last_converted_order_id' => (int) $last->order_id, 'last_converted_at' => current_time( 'mysql', true ) );
         }
         $wpdb->update( $ct, $data, array( 'id' => $customer_id ) );
@@ -239,15 +239,25 @@ class WCR_Customers {
         }
         return $converted;
     }
+    // Customers who can be contacted now (any channel): Eligible or Follow-up due, and not marked Do not contact.
+    public static function is_due( $c ) {
+        return ! (int) $c->dnc && in_array( $c->state, array( 'eligible', 'followup' ), true );
+    }
+    // A WhatsApp or email contact was made: it counts for the current cycle.
+    public static function record_contact( $c, $type, $channel ) {
+        global $wpdb;
+        $wpdb->query( $wpdb->prepare( 'UPDATE ' . WCR_DB::customers_table() . ' SET last_contact_at=%s, last_contact_by=%d, last_contact_type=%s, last_contact_channel=%s, cycle_contacts=cycle_contacts+1, cycle_voucher=GREATEST(cycle_voucher,%d) WHERE id=%d',
+            current_time( 'mysql', true ), get_current_user_id(), $type, $channel, 'voucher' === $type ? 1 : 0, $c->id ) );
+    }
     // Contact fields of the current cycle, from its open contacts (after an Undo).
     public static function refresh_contact_fields( $customer_id ) {
         global $wpdb;
-        $rows = $wpdb->get_results( $wpdb->prepare( 'SELECT created_at, created_by, type FROM ' . WCR_DB::contacts_table() . " WHERE customer_id=%d AND status='contacted' ORDER BY created_at DESC, id DESC", $customer_id ) );
+        $rows = $wpdb->get_results( $wpdb->prepare( 'SELECT created_at, created_by, type, channel FROM ' . WCR_DB::contacts_table() . " WHERE customer_id=%d AND status='contacted' ORDER BY created_at DESC, id DESC", $customer_id ) );
         $voucher = 0;
         foreach ( $rows as $r ) if ( 'voucher' === $r->type ) $voucher = 1;
         $wpdb->update( WCR_DB::customers_table(), array(
             'last_contact_at' => $rows ? $rows[0]->created_at : null, 'last_contact_by' => $rows ? $rows[0]->created_by : null, 'last_contact_type' => $rows ? $rows[0]->type : null,
-            'cycle_contacts' => count( $rows ), 'cycle_voucher' => $voucher,
+            'last_contact_channel' => $rows ? $rows[0]->channel : null, 'cycle_contacts' => count( $rows ), 'cycle_voucher' => $voucher,
         ), array( 'id' => $customer_id ) );
     }
 
@@ -270,7 +280,7 @@ class WCR_Customers {
         }
         // Contacts made before the (possibly new) last order belong to a cycle that has ended.
         $wpdb->query( $wpdb->prepare( "UPDATE $kt k JOIN $ct c ON c.id=k.customer_id SET k.status='closed', k.closed_at=%s WHERE k.status='contacted' AND c.last_order_at IS NOT NULL AND k.created_at < c.last_order_at", $now ) );
-        $wpdb->query( "UPDATE $ct SET last_contact_at=NULL, last_contact_by=NULL, last_contact_type=NULL, cycle_contacts=0, cycle_voucher=0 WHERE last_contact_at IS NOT NULL AND last_order_at IS NOT NULL AND last_contact_at < last_order_at" );
+        $wpdb->query( "UPDATE $ct SET last_contact_at=NULL, last_contact_by=NULL, last_contact_type=NULL, last_contact_channel=NULL, cycle_contacts=0, cycle_voucher=0 WHERE last_contact_at IS NOT NULL AND last_order_at IS NOT NULL AND last_contact_at < last_order_at" );
         $wpdb->query( "DELETE c FROM $ct c LEFT JOIN $ot o ON o.customer_id=c.id LEFT JOIN $kt k ON k.customer_id=c.id WHERE o.order_id IS NULL AND k.id IS NULL" );
     }
 
@@ -359,6 +369,7 @@ class WCR_Customers {
         'all' => 'All customers', 'eligible' => 'Eligible for reminder', 'followup' => 'Follow-up due', 'not_eligible' => 'Not yet eligible', 'open_order' => 'Has an open order',
         'contacted' => 'Already contacted', 'contacted_voucher' => 'Contacted with voucher', 'contacted_plain' => 'Contacted without voucher',
         'converted' => 'Ordered after reminder', 'dnc' => 'Do not contact', 'no_phone' => 'No valid WhatsApp number',
+        'has_email' => 'Has email (subscribed)', 'email_unsub' => 'Unsubscribed from email',
     );
     const ORDERBY = array( 'days' => 'c.last_order_at', 'orders' => 'c.order_count', 'spent' => 'c.total_value', 'aov' => '(c.total_value/c.order_count)', 'name' => 'c.name' );
     // $f: view, ctype, min_orders, min_spent, from, to (Y-m-d, store time), s, orderby, order, page, per.
@@ -374,6 +385,8 @@ class WCR_Customers {
             case 'contacted_plain': $where[] = 'c.last_contact_at IS NOT NULL AND c.cycle_voucher=0'; break;
             case 'converted': $where[] = 'c.conversions>0'; break;
             case 'no_phone': $where[] = "c.wa_number=''"; break;
+            case 'has_email': $where[] = $wpdb->prepare( 'c.email LIKE %s AND c.dnc_email=0', '%@%' ); break;
+            case 'email_unsub': $where[] = 'c.dnc_email=1'; break;
         }
         if ( 'registered' === $f['ctype'] ) $where[] = 'c.user_id IS NOT NULL';
         if ( 'guest' === $f['ctype'] ) $where[] = 'c.user_id IS NULL';

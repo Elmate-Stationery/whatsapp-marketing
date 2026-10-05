@@ -2,7 +2,7 @@
 Requires at least: 6.4
 Requires PHP: 7.4
 WC requires at least: 7.2
-Stable tag: 1.1.0
+Stable tag: 1.2.0
 
 Find customers who have not ordered again for a while and remind them on WhatsApp, with or without a personal voucher.
 
@@ -16,7 +16,11 @@ Workflow: a customer's last counted order passes the reminder period (default 30
 WhatsApp + Voucher → WhatsApp opens with their number and the message filled in → you press Send. Nothing is ever
 sent automatically.
 
-* WhatsApp buttons and Add Voucher appear only for customers who are Eligible or Follow-up due.
+* Contact buttons (WhatsApp, Email) and Add Voucher appear only for customers who are Eligible or Follow-up due.
+* Email: the admin sends a reminder email (with or without the voucher) from the list; the HTML template (Bangla
+  by default) is edited under Settings → Email with a live preview and test sending. Every email has an unsubscribe
+  link. Emails and WhatsApp share one reminder cycle.
+* UTM tags on the offer link let WooCommerce Order Attribution record each order's source (whatsapp / email).
 * Customers are identified by phone first (normalized WhatsApp number), then billing email, then account.
 * A new counted order closes the reminder cycle: the reminder is Converted when the order came within the conversion
   window (default 30 days) or used its voucher; the next reminder is calculated from the new order.
@@ -33,6 +37,13 @@ sent automatically.
 * Requires WooCommerce. Independent of Checkout Tracker.
 
 == Changelog ==
+
+= 1.2.0 =
+* Reminder emails (Email / Email + Voucher) with an editable HTML template, live preview and unsubscribe.
+* Test email box in Settings → Email: up to 5 recipients (remembered), with / without voucher, optional real customer
+  data, test-safe links, 10-second pause between sends.
+* UTM tags on offer links; order source (WooCommerce Order Attribution) in the Conversions tab; results per channel.
+* Serial number column in the customer list.
 
 = 1.1.0 =
 * Vouchers are created by the admin (Add Voucher dialog) and sent with WhatsApp + Voucher; statuses Generated, Sent,

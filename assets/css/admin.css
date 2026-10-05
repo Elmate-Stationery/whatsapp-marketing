@@ -134,3 +134,52 @@ th.wcr-num a{justify-content:flex-end}
 .wcr-settings-sub{padding:16px 0 0!important}
 .wcr-warn-text{color:#996800!important}
 @media (max-width:600px){.wcr-field-grid{grid-template-columns:minmax(0,1fr)}}
+
+/* Serial number + email buttons */
+.wcr-sn{width:36px;text-align:right;color:#646970;font-variant-numeric:tabular-nums}
+.wcr-customers.has-vouchers{min-width:1440px}
+.wcr-email-buttons{margin-top:6px}
+.wcr-email{display:inline-flex!important;align-items:center;gap:4px;color:#135e96!important;border-color:#72aee6!important}
+.wcr-email:hover,.wcr-email:focus{background:#f0f6fc!important}
+.wcr-email .dashicons{width:16px;height:16px;font-size:16px}
+.wcr-email[disabled]{opacity:.6}
+
+/* Settings → Email */
+.wcr-email-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,640px);gap:24px;align-items:start}
+.wcr-email-fields .form-table th{width:170px}
+.wcr-email-preview{position:sticky;top:46px;padding:12px;border:1px solid #dcdcde;border-radius:8px;background:#fff}
+.wcr-email-preview__bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px}
+.wcr-seg .button{margin:0}
+.wcr-seg .button.is-active{background:#2271b1;border-color:#2271b1;color:#fff}
+.wcr-email-subject{margin:0 0 8px;overflow-wrap:anywhere}
+#wcr-email-frame{display:block;width:100%;height:70vh;min-height:520px;border:1px solid #dcdcde;border-radius:6px;background:#eef1f4}
+.wcr-email-test{margin-top:10px}
+.wcr-email-test input{width:240px;max-width:100%}
+.wcr-colors{display:flex;flex-wrap:wrap;gap:8px 18px}
+.wcr-color{display:inline-flex;align-items:center;gap:6px}
+.wcr-color input[type=color]{width:44px;height:30px;padding:0 2px;border:1px solid #8c8f94;border-radius:4px;background:#fff}
+.wcr-logo-preview{display:block;max-width:220px;max-height:64px;margin-bottom:8px;padding:6px;border:1px solid #dcdcde;background:#fff}
+.wcr-logo-preview[hidden]{display:none}
+@media (max-width:1280px){.wcr-email-layout{grid-template-columns:minmax(0,1fr)}.wcr-email-preview{position:static}}
+
+/* Settings → Email: test email box */
+.wcr-test-box{margin:0 0 16px;padding:12px 14px;border:1px solid #c3c4c7;border-left:4px solid #2271b1;border-radius:6px;background:#f6f7f7}
+.wcr-test-box h3{margin:0 0 10px;font-size:14px}
+.wcr-test-box label[for]{display:block;margin-bottom:3px;font-weight:600}
+.wcr-test-box input[type=text],.wcr-test-box input[type=search]{width:100%}
+.wcr-test-box p{margin:0 0 10px}
+.wcr-test-box .description{display:block;margin-top:3px}
+.wcr-test-type{margin:0 0 10px;padding:0;border:0}
+.wcr-test-type legend{margin-bottom:3px;font-weight:600}
+.wcr-test-customer{position:relative;margin-bottom:10px}
+.wcr-test-results{position:absolute;left:0;right:0;z-index:10;max-height:240px;margin:2px 0 0;padding:4px 0;overflow:auto;border:1px solid #c3c4c7;border-radius:4px;background:#fff;box-shadow:0 4px 12px rgba(0,0,0,.12);list-style:none}
+.wcr-test-results[hidden]{display:none}
+.wcr-test-results li{margin:0}
+.wcr-test-results button{display:block;width:100%;padding:6px 10px;border:0;background:none;text-align:left;cursor:pointer;overflow-wrap:anywhere}
+.wcr-test-results button:hover,.wcr-test-results button:focus{background:#f0f6fc;outline:0}
+.wcr-test-none{padding:6px 10px;color:#646970}
+.wcr-test-chosen{margin:6px 0 0!important}
+.wcr-test-chosen[hidden]{display:none}
+.wcr-test-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.wcr-test-result.is-ok{color:#00632a;font-weight:600}
+.wcr-test-result.is-error{color:#b32d2e;font-weight:600}

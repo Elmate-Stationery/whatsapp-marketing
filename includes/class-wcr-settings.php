@@ -23,6 +23,8 @@ class WCR_Settings {
             'country_code'       => '880',
             'offer_destination'  => 'shop',
             'offer_popup'        => 1,
+            'utm_enabled'        => 1,
+            'utm_campaign'       => 'winback',
             'template_plain'     => self::DEFAULT_PLAIN,
             'template_voucher'   => self::DEFAULT_VOUCHER,
             'voucher_enabled'    => 1,
@@ -38,7 +40,7 @@ class WCR_Settings {
             'coupon_restrict_email' => 0,
             'log_retention_days' => 365,
             'delete_on_uninstall'=> 0,
-        );
+        ) + WCR_Email::defaults();
     }
     public static function get() {
         if ( null === self::$cache ) {

@@ -212,6 +212,84 @@ check( 'unsent voucher revoked automatically on the new order', $ev->status . '/
 $res = ajax( 'wcr_history', array( 'id' => $r->id ) );
 check( 'history renders reminders and vouchers', $res['success'] && false !== strpos( $res['data']['html'], 'Converted' ) && false !== strpos( $res['data']['html'], '<h3>Vouchers</h3>' ), true );
 
+echo "\n-- email\n";
+$sent = array(); $mail_ok = true;
+add_filter( 'pre_wp_mail', function ( $r, $atts ) use ( &$sent, &$mail_ok ) { $sent[] = $atts; return $mail_ok; }, 10, 2 );
+$mo = make_order( '01912345670', 'Mitu', 50, 1200, 'completed', 'mitu@example.com' );
+$mp = new WC_Product_Simple(); $mp->set_name( 'মেঘের ওপর বাড়ি' ); $mp->set_regular_price( 1200 ); $mp->save();
+$mo->add_product( $mp, 1 ); $mo->set_total( 1200 ); $mo->save(); WCR_Customers::process_queue();
+$mc = cust( '8801912345670' );
+$cells = WCR_Admin::cells( $mc->id );
+check( 'email buttons for an eligible customer with email', false !== strpos( $cells['waCell'], 'wcr-email' ), true );
+$res = ajax( 'wcr_email', array( 'id' => $k->id, 'type' => 'plain' ) );
+check( 'not eligible: email refused', $res['success'], false );
+ajax( 'wcr_voucher_create', array( 'id' => $mc->id, 'amount' => 5, 'valid_days' => 3 ) );
+$sent = array(); // only this plugin's email (WooCommerce sent its own order emails above)
+$res = ajax( 'wcr_email', array( 'id' => $mc->id, 'type' => 'voucher' ) );
+check( 'email + voucher sent', $res['success'] && 1 === count( $sent ), true );
+$m = $sent[0];
+$mv = $wpdb->get_row( 'SELECT * FROM ' . WCR_DB::coupons_table() . ' WHERE customer_id=' . (int) $mc->id );
+$headers = implode( "\n", (array) $m['headers'] );
+check( 'recipient and subject', $m['to'] . ' | ' . ( false !== strpos( $m['subject'], 'Mitu' ) ? 'name in subject' : $m['subject'] ), 'mitu@example.com | name in subject' );
+check( 'html: Bangla greeting, code, offer link, unsubscribe link', false !== strpos( $m['message'], 'প্রিয় Mitu Test,' ) && false !== strpos( $m['message'], $mv->code ) && false !== strpos( $m['message'], 'wcr-offer=' ) && false !== strpos( $m['message'], 'wcr-unsub=' ), true );
+check( 'html content type and List-Unsubscribe headers', false !== strpos( $headers, 'text/html' ) && false !== strpos( $headers, 'List-Unsubscribe: <' ) && false !== strpos( $headers, 'List-Unsubscribe=One-Click' ), true );
+check( 'last-order box shows the product', false !== strpos( $m['message'], 'আপনার শেষ অর্ডার:' ) && false !== strpos( $m['message'], 'মেঘের ওপর বাড়ি' ), true );
+$end = ( new DateTimeImmutable( 'today +3 days', wp_timezone() ) )->format( 'Y-m-d' ) . ' 23:59';
+check( 'voucher sent by email: valid until end of day 3', $mv->status . ' ' . wp_date( 'Y-m-d H:i', strtotime( $mv->expires_at . ' UTC' ) ), 'sent ' . $end );
+$ek = $wpdb->get_row( 'SELECT * FROM ' . WCR_DB::contacts_table() . ' WHERE customer_id=' . (int) $mc->id );
+check( 'contact recorded as email', $ek->channel . '/' . $ek->status . '/' . $ek->email_to . '/' . ( '' !== (string) $ek->subject ? 'subject' : 'no subject' ), 'email/contacted/mitu@example.com/subject' );
+$mc = WCR_Customers::get( $mc->id );
+check( 'customer contacted by email (same cycle as WhatsApp)', $mc->state . '/' . $mc->last_contact_channel . '/' . $mc->cycle_voucher, 'contacted/email/1' );
+$res = ajax( 'wcr_undo', array( 'id' => $mc->id ) );
+check( 'an email cannot be undone', $res['success'], false );
+preg_match( '/wcr-unsub=([0-9]+\.[a-f0-9]{32})/', $m['message'], $u );
+check( 'unsubscribe link is signed for this customer', WCR_Email::parse_unsub( $u[1] ?? '' ), (int) $mc->id );
+check( 'tampered unsubscribe link rejected', WCR_Email::parse_unsub( ( (int) $mc->id + 1 ) . '.' . substr( $u[1] ?? '', -32 ) ), 0 );
+WCR_Email::unsubscribe( $mc->id );
+$mc = WCR_Customers::get( $mc->id );
+check( 'unsubscribed: no more email, WhatsApp unaffected', var_export( WCR_Email::can_email( $mc ), true ) . '/' . (int) $mc->dnc . '/' . (int) $mc->dnc_email, 'false/0/1' );
+list( , $total ) = WCR_Customers::query( array( 'view' => 'email_unsub' ) + $base );
+check( 'unsubscribed filter', $total, 1 );
+// Test email from the settings: current format, test addresses only, nothing recorded.
+check( 'test recipients: two addresses', WCR_Email::parse_recipients( 'a@example.com, b@example.com' ), array( 'a@example.com', 'b@example.com' ) );
+check( 'test recipients: more than 5 refused', is_wp_error( WCR_Email::parse_recipients( 'a@x.co,b@x.co,c@x.co,d@x.co,e@x.co,f@x.co' ) ), true );
+check( 'test recipients: invalid address refused', is_wp_error( WCR_Email::parse_recipients( 'a@example.com, nonsense' ) ), true );
+$res = ajax( 'wcr_customer_search', array( 'q' => 'Mitu' ) );
+check( 'customer search finds the customer', $res['success'] && (int) $res['data'][0]['id'] === (int) $mc->id, true );
+$contacts_before = (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . WCR_DB::contacts_table() );
+$coupons_before = (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . WCR_DB::coupons_table() );
+delete_transient( 'wcr_test_mail_' . get_current_user_id() );
+$sent = array();
+$res = ajax( 'wcr_email_test', array( 'to' => 'qa1@example.com, qa2@example.com', 'test_type' => 'plain', 'customer_id' => $mc->id ) );
+check( 'test email sent', $res['success'] && 1 === count( $sent ), true );
+check( 'goes only to the test addresses, [Test] subject', implode( ',', (array) $sent[0]['to'] ) . ' | ' . ( 0 === strpos( $sent[0]['subject'], '[Test] ' ) ? 'test subject' : $sent[0]['subject'] ), 'qa1@example.com,qa2@example.com | test subject' );
+check( 'uses the chosen customer (name and last-order product)', false !== strpos( $sent[0]['message'], 'প্রিয় Mitu Test,' ) && false !== strpos( $sent[0]['message'], 'মেঘের ওপর বাড়ি' ), true );
+check( 'test links: sample offer link and test unsubscribe link', false !== strpos( $sent[0]['message'], 'wcr-offer=' . WCR_Email::SAMPLE_TOKEN ) && false !== strpos( $sent[0]['message'], 'wcr-unsub=test' ), true );
+check( 'nothing recorded, no voucher created', ( (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . WCR_DB::contacts_table() ) - $contacts_before ) . '/' . ( (int) $wpdb->get_var( 'SELECT COUNT(*) FROM ' . WCR_DB::coupons_table() ) - $coupons_before ), '0/0' );
+check( 'test addresses remembered for this admin', get_user_meta( get_current_user_id(), WCR_Email::TEST_META, true ), 'qa1@example.com, qa2@example.com' );
+$res = ajax( 'wcr_email_test', array( 'to' => 'qa1@example.com', 'test_type' => 'voucher' ) );
+check( 'second test within 10 seconds is refused', $res['success'] . '|' . ( false !== strpos( $res['data']['message'] ?? '', 'wait' ) ? 'wait' : '' ), '|wait' );
+delete_transient( 'wcr_test_mail_' . get_current_user_id() );
+$sent = array();
+$res = ajax( 'wcr_email_test', array( 'to' => 'qa1@example.com', 'test_type' => 'voucher' ) );
+check( 'sample customer with voucher', $res['success'] && false !== strpos( $sent[0]['message'], 'Najmul Hasan' ) && false !== strpos( $sent[0]['message'], '2NDTIME5' ), true );
+// A failed send is recorded but does not count as a contact.
+make_order( '01912345671', 'Fail', 50, 900, 'completed', 'fail@example.com' );
+$fl = cust( '8801912345671' );
+$mail_ok = false;
+$res = ajax( 'wcr_email', array( 'id' => $fl->id, 'type' => 'plain' ) );
+$mail_ok = true;
+$fk = $wpdb->get_row( 'SELECT * FROM ' . WCR_DB::contacts_table() . ' WHERE customer_id=' . (int) $fl->id );
+check( 'failed email: error shown, recorded as failed, customer still eligible', var_export( $res['success'], true ) . '/' . $fk->status . '/' . WCR_Customers::get( $fl->id )->state, 'false/failed/eligible' );
+echo "\n-- UTM and serial numbers\n";
+$utm = WCR_WhatsApp::with_utm( 'http://shop.test/?page_id=5', (object) array( 'channel' => 'email', 'type' => 'voucher' ) );
+check( 'UTM tags for an email voucher link', $utm, 'http://shop.test/?page_id=5&utm_source=email&utm_medium=email&utm_campaign=winback&utm_content=voucher' );
+$utm = WCR_WhatsApp::with_utm( 'http://shop.test/', (object) array( 'channel' => 'whatsapp', 'type' => 'plain' ) );
+check( 'UTM tags for a WhatsApp reminder link', $utm, 'http://shop.test/?utm_source=whatsapp&utm_medium=messaging&utm_campaign=winback&utm_content=reminder' );
+$_GET = array( 'page' => 'whatsapp-marketing', 'view' => 'all' );
+ob_start(); WCR_Admin::page(); $html = ob_get_clean();
+check( 'serial numbers 1..n in the table', false !== strpos( $html, '<td class="wcr-sn">1</td>' ) && false !== strpos( $html, '<td class="wcr-sn">2</td>' ), true );
+
 echo "\n-- order changes\n";
 $new->update_status( 'cancelled' ); WCR_Customers::process_queue();
 $r = cust( '8801712345678' );
@@ -265,7 +343,7 @@ $p->delete( true );
 echo "\n-- admin pages render without notices\n";
 $errors = array();
 set_error_handler( function ( $no, $str, $file, $line ) use ( &$errors ) { $errors[] = "$str ($file:$line)"; return true; } );
-foreach ( array( array(), array( 'view' => 'all', 'orderby' => 'aov', 'order' => 'asc' ), array( 'tab' => 'conversions' ), array( 'tab' => 'vouchers' ),
+foreach ( array( array(), array( 'view' => 'all', 'orderby' => 'aov', 'order' => 'asc' ), array( 'tab' => 'conversions' ), array( 'tab' => 'vouchers' ), array( 'tab' => 'settings', 'section' => 'email' ),
     array( 'tab' => 'settings' ), array( 'tab' => 'settings', 'section' => 'messages' ), array( 'tab' => 'settings', 'section' => 'voucher' ), array( 'tab' => 'settings', 'section' => 'data' ) ) as $get ) {
     $_GET = $get + array( 'page' => 'whatsapp-marketing' );
     ob_start(); WCR_Admin::page(); $html = ob_get_clean();

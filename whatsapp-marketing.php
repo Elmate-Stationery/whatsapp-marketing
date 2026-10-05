@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WhatsApp Marketing
  * Description: Finds customers who have not ordered again for a set period and lets you remind them on WhatsApp, with or without a personal voucher. Messages are never sent automatically.
- * Version: 1.1.0
+ * Version: 1.2.0
  * Author: Elmate Stationery
  * Author URI: https://elmatestationery.com
  * Requires at least: 6.4
@@ -23,7 +23,7 @@ if ( defined( 'WCR_FILE' ) || class_exists( 'WCR_DB', false ) ) {
     return;
 }
 
-define( 'WCR_VERSION', '1.1.0' );
+define( 'WCR_VERSION', '1.2.0' );
 define( 'WCR_FILE', __FILE__ );
 define( 'WCR_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WCR_URL', plugin_dir_url( __FILE__ ) );
@@ -52,6 +52,7 @@ $wcr_classes = array(
     'class-wcr-whatsapp'  => 'WCR_WhatsApp',
     'class-wcr-coupons'   => 'WCR_Coupons',
     'class-wcr-storefront' => 'WCR_Storefront',
+    'class-wcr-email'     => 'WCR_Email',
     'class-wcr-admin'     => 'WCR_Admin',
     'class-wcr-privacy'   => 'WCR_Privacy',
 );
@@ -116,6 +117,7 @@ add_action( 'plugins_loaded', function () {
         WCR_WhatsApp::init();
         WCR_Coupons::init();
         WCR_Storefront::init();
+        WCR_Email::init();
         WCR_Admin::init();
         WCR_Privacy::init();
         add_action( 'init', array( 'WCR_DB', 'schedule' ) );

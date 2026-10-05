@@ -139,7 +139,7 @@ class WCR_WhatsApp {
     }
     // Customers who can be contacted now: WhatsApp buttons and Add Voucher are shown (and accepted) only for these.
     public static function is_due( $c ) {
-        return ! (int) $c->dnc && '' !== $c->wa_number && in_array( $c->state, array( 'eligible', 'followup' ), true );
+        return '' !== $c->wa_number && WCR_Customers::is_due( $c );
     }
     // [WhatsApp] / [WhatsApp + Voucher]. [WhatsApp + Voucher] sends the customer's current voucher (added by the admin);
     // its validity period starts with the first send.
@@ -169,9 +169,9 @@ class WCR_WhatsApp {
         $now = current_time( 'mysql', true );
         $wpdb->insert( WCR_DB::contacts_table(), array(
             'customer_id' => (int) $c->id, 'anchor_order_id' => $c->last_order_id, 'created_at' => $now, 'created_by' => get_current_user_id(),
-            'type' => $type, 'coupon_id' => $coupon ? (int) $coupon->id : null, 'wa_number' => $c->wa_number, 'message' => $message, 'token_hash' => $hash,
+            'type' => $type, 'channel' => 'whatsapp', 'coupon_id' => $coupon ? (int) $coupon->id : null, 'wa_number' => $c->wa_number, 'message' => $message, 'token_hash' => $hash,
         ) );
-        $wpdb->query( $wpdb->prepare( 'UPDATE ' . WCR_DB::customers_table() . ' SET last_contact_at=%s, last_contact_by=%d, last_contact_type=%s, cycle_contacts=cycle_contacts+1, cycle_voucher=GREATEST(cycle_voucher,%d) WHERE id=%d', $now, get_current_user_id(), $type, 'voucher' === $type ? 1 : 0, $c->id ) );
+        WCR_Customers::record_contact( $c, $type, 'whatsapp' );
         $url = 'https://wa.me/' . $c->wa_number . '?text=' . rawurlencode( $message );
         wp_send_json_success( array( 'url' => $url ) + WCR_Admin::cells( (int) $c->id ) );
     }
@@ -183,6 +183,7 @@ class WCR_WhatsApp {
         $kt = WCR_DB::contacts_table();
         $k = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $kt WHERE customer_id=%d AND status='contacted' ORDER BY created_at DESC, id DESC LIMIT 1", $c->id ) );
         if ( ! $k || strtotime( $k->created_at . ' UTC' ) < time() - self::UNDO_HOURS * HOUR_IN_SECONDS ) wp_send_json_error( array( 'message' => 'There is no recent contact to undo.' ), 400 );
+        if ( 'email' === $k->channel ) wp_send_json_error( array( 'message' => 'The last contact was an email, which has already been sent and cannot be undone.' ), 400 );
         $wpdb->query( $wpdb->prepare( "UPDATE $kt SET status='undone', closed_at=%s WHERE id=%d AND status='contacted'", current_time( 'mysql', true ), $k->id ) );
         WCR_Customers::refresh_contact_fields( (int) $c->id );
         wp_send_json_success( WCR_Admin::cells( (int) $c->id ) );
@@ -223,7 +224,7 @@ class WCR_WhatsApp {
         if ( self::is_preview_request( $agent ) || ! preg_match( '/^[A-Za-z0-9_-]{43}$/', $token ) ) { wp_safe_redirect( $destination ); exit; }
         global $wpdb;
         $kt = WCR_DB::contacts_table();
-        $k = $wpdb->get_row( $wpdb->prepare( "SELECT id, coupon_id FROM $kt WHERE token_hash=%s", hash( 'sha256', $token ) ) );
+        $k = $wpdb->get_row( $wpdb->prepare( "SELECT id, coupon_id, channel, type FROM $kt WHERE token_hash=%s", hash( 'sha256', $token ) ) );
         if ( $k ) {
             // Staff testing a link are not counted as the customer opening it.
             if ( ! current_user_can( 'manage_woocommerce' ) ) {
@@ -231,8 +232,22 @@ class WCR_WhatsApp {
                 $wpdb->query( $wpdb->prepare( "UPDATE $kt SET link_opens=link_opens+1, first_open_at=COALESCE(first_open_at,%s), last_open_at=%s, last_device=%s WHERE id=%d", $now, $now, self::device_label( $agent ), $k->id ) );
             }
             if ( $k->coupon_id ) WCR_Storefront::offer_opened( (int) $k->coupon_id );
+            $destination = self::with_utm( $destination, $k );
         }
         wp_safe_redirect( $destination );
         exit;
+    }
+    // UTM tags on the page the offer link leads to, so WooCommerce's Order Attribution records the order's origin
+    // (Orders screen → Origin, and WooCommerce's reports): utm_source = whatsapp / email, utm_content = voucher / reminder.
+    public static function with_utm( $url, $contact ) {
+        $s = WCR_Settings::get();
+        if ( empty( $s['utm_enabled'] ) ) return $url;
+        $email = 'email' === $contact->channel;
+        return add_query_arg( array(
+            'utm_source'   => $email ? 'email' : 'whatsapp',
+            'utm_medium'   => $email ? 'email' : 'messaging',
+            'utm_campaign' => rawurlencode( '' !== trim( (string) $s['utm_campaign'] ) ? (string) $s['utm_campaign'] : 'winback' ),
+            'utm_content'  => 'voucher' === $contact->type ? 'voucher' : 'reminder',
+        ), $url );
     }
 }

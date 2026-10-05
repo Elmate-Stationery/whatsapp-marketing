@@ -54,6 +54,18 @@
       .catch(function(){ if(win) win.close(); setBusy(id,false); window.alert('Could not reach the server. Check your connection and try again.'); });
   }
 
+  // Email / Email + Voucher: sent by the server right away, so the admin confirms first (an email cannot be unsent).
+  function sendEmail(btn){
+    if(btn.disabled) return;
+    var to=btn.getAttribute('data-to'), code=btn.getAttribute('data-code'), id=btn.getAttribute('data-id');
+    if(!window.confirm(code ? 'Send voucher '+code+' by email to '+to+'?' : 'Send the reminder email to '+to+'?')) return;
+    setBusy(id,true);
+    post('wcr_email',{id:id,type:btn.getAttribute('data-type')}).then(function(res){
+      if(res && res.data) applyCells(id,res.data);
+      if(!res || !res.success){ setBusy(id,false); window.alert(errorOf(res,'The email could not be sent.')); }
+    }).catch(function(){ setBusy(id,false); window.alert('Could not reach the server. Check your connection and try again.'); });
+  }
+
   function undo(btn){
     if(!window.confirm('Mark the last WhatsApp contact as not sent? It will no longer count as contacted.')) return;
     var id=btn.getAttribute('data-id');
@@ -160,6 +172,7 @@
     if(!e.target.closest) return;
     var b;
     if((b=e.target.closest('.wcr-wa'))){ e.preventDefault(); sendWhatsApp(b); }
+    else if((b=e.target.closest('.wcr-email'))){ e.preventDefault(); sendEmail(b); }
     else if((b=e.target.closest('.wcr-voucher-add'))){ e.preventDefault(); openVoucher(b); }
     else if((b=e.target.closest('.wcr-voucher-revoke'))){ e.preventDefault(); revokeVoucher(b); }
     else if((b=e.target.closest('.wcr-undo'))){ e.preventDefault(); undo(b); }
