@@ -1,7 +1,7 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) exit;
 
-// Marketing → WhatsApp Marketing: Customers (dashboard + list), Conversions, Vouchers and Settings tabs.
+// Marketing → Customer Campaigns: Customers (dashboard + list), Conversions, Vouchers and Settings tabs.
 class WCR_Admin {
     const PAGE = 'whatsapp-marketing';
     const PER_PAGE = 25;
@@ -29,9 +29,9 @@ class WCR_Admin {
         array_unshift( $links, '<a href="' . esc_url( self::url( array( 'tab' => 'settings' ) ) ) . '">Settings</a>' );
         return $links;
     }
-    // Marketing → WhatsApp Marketing (WooCommerce adds the Marketing menu at admin_menu priority 6).
+    // Marketing → Customer Campaigns (WooCommerce adds the Marketing menu at admin_menu priority 6).
     public static function menu() {
-        add_submenu_page( 'woocommerce-marketing', 'WhatsApp Marketing', 'WhatsApp Marketing', 'manage_woocommerce', self::PAGE, array( __CLASS__, 'page' ) );
+        add_submenu_page( 'woocommerce-marketing', 'Customer Campaigns', 'Customer Campaigns', 'manage_woocommerce', self::PAGE, array( __CLASS__, 'page' ) );
     }
     private static function url( $args = array() ) {
         return add_query_arg( $args, admin_url( 'admin.php?page=' . self::PAGE ) );
@@ -124,7 +124,7 @@ class WCR_Admin {
     public static function page() {
         if ( ! current_user_can( 'manage_woocommerce' ) ) return;
         $tab = self::tab();
-        echo '<div class="wrap wcr-wrap"><h1 class="wp-heading-inline">WhatsApp Marketing</h1>';
+        echo '<div class="wrap wcr-wrap"><h1 class="wp-heading-inline">Customer Campaigns</h1>';
         $notice = sanitize_key( $_GET['wcr_notice'] ?? '' );
         if ( isset( self::NOTICES[ $notice ] ) ) echo '<div class="notice notice-' . esc_attr( self::NOTICES[ $notice ][0] ) . ' is-dismissible"><p>' . esc_html( self::NOTICES[ $notice ][1] ) . '</p></div>';
         $state = WCR_Customers::rebuild_state();

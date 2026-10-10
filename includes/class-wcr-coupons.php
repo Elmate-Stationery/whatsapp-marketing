@@ -150,7 +150,7 @@ class WCR_Coupons {
             $coupon->set_usage_limit( $config['usage_limit'] );
             $coupon->set_individual_use( $config['individual'] );
             if ( $config['restrict_email'] && is_email( $c->email ) ) $coupon->set_email_restrictions( array( $c->email ) );
-            $coupon->set_description( sprintf( 'WhatsApp reminder voucher for %s. Created by WhatsApp Marketing.', $c->name ? $c->name : 'customer #' . (int) $c->id ) );
+            $coupon->set_description( sprintf( 'WhatsApp reminder voucher for %s. Created by Customer Campaigns.', $c->name ? $c->name : 'customer #' . (int) $c->id ) );
             $coupon->update_meta_data( self::META, $id );
             $wc_id = $coupon->save(); // no end date until it is sent
         } catch ( Exception $e ) {

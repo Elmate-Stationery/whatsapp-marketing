@@ -2,7 +2,7 @@
   "name": "whatsapp-marketing",
   "version": "1.2.0",
   "private": true,
-  "description": "WhatsApp Marketing (WordPress plugin). package.json exists only for the dev scripts.",
+  "description": "Customer Campaigns (WordPress plugin). package.json exists only for the dev scripts.",
   "scripts": {
     "lint": "node tools/lint.js",
     "test": "node tools/lint.js && php tools/selftest.php"

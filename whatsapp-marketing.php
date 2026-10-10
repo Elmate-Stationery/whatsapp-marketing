@@ -1,6 +1,6 @@
 <?php
 /**
- * Plugin Name: WhatsApp Marketing
+ * Plugin Name: Customer Campaigns
  * Description: Finds customers who have not ordered again for a set period and lets you remind them on WhatsApp, with or without a personal voucher. Messages are never sent automatically.
  * Version: 1.2.0
  * Author: Elmate Stationery
@@ -18,7 +18,7 @@ if ( ! defined( 'ABSPATH' ) ) exit;
 
 if ( defined( 'WCR_FILE' ) || class_exists( 'WCR_DB', false ) ) {
     add_action( 'admin_notices', function () {
-        if ( current_user_can( 'activate_plugins' ) ) echo '<div class="notice notice-error"><p><strong>WhatsApp Marketing</strong> is installed more than once. Under Plugins, deactivate and delete the extra copy.</p></div>';
+        if ( current_user_can( 'activate_plugins' ) ) echo '<div class="notice notice-error"><p><strong>Customer Campaigns</strong> is installed more than once. Under Plugins, deactivate and delete the extra copy.</p></div>';
     } );
     return;
 }
@@ -29,9 +29,9 @@ define( 'WCR_DIR', plugin_dir_path( __FILE__ ) );
 define( 'WCR_URL', plugin_dir_url( __FILE__ ) );
 
 function wcr_boot_error( $message ) {
-    error_log( 'WhatsApp Marketing disabled itself: ' . $message );
+    error_log( 'Customer Campaigns disabled itself: ' . $message );
     add_action( 'admin_notices', function () use ( $message ) {
-        if ( current_user_can( 'activate_plugins' ) ) echo '<div class="notice notice-error"><p><strong>WhatsApp Marketing</strong> is not running: ' . esc_html( $message ) . '</p></div>';
+        if ( current_user_can( 'activate_plugins' ) ) echo '<div class="notice notice-error"><p><strong>Customer Campaigns</strong> is not running: ' . esc_html( $message ) . '</p></div>';
     } );
 }
 
@@ -76,10 +76,10 @@ try {
 // covers older WordPress, and stops activation (the plugin stays inactive) when WooCommerce is missing or too old.
 function wcr_activate() {
     if ( ! class_exists( 'WooCommerce' ) ) {
-        wp_die( '<strong>WhatsApp Marketing</strong> requires WooCommerce. Install and activate WooCommerce first, then activate WhatsApp Marketing.', 'WooCommerce required', array( 'back_link' => true ) );
+        wp_die( '<strong>Customer Campaigns</strong> requires WooCommerce. Install and activate WooCommerce first, then activate Customer Campaigns.', 'WooCommerce required', array( 'back_link' => true ) );
     }
     if ( defined( 'WC_VERSION' ) && version_compare( WC_VERSION, '7.2', '<' ) ) {
-        wp_die( esc_html( sprintf( 'WhatsApp Marketing requires WooCommerce 7.2 or newer. This site runs WooCommerce %s.', WC_VERSION ) ), 'WooCommerce update required', array( 'back_link' => true ) );
+        wp_die( esc_html( sprintf( 'Customer Campaigns requires WooCommerce 7.2 or newer. This site runs WooCommerce %s.', WC_VERSION ) ), 'WooCommerce update required', array( 'back_link' => true ) );
     }
     WCR_DB::install();
 }
@@ -102,7 +102,7 @@ add_action( 'plugins_loaded', function () {
             if ( ! current_user_can( 'activate_plugins' ) ) return;
             deactivate_plugins( plugin_basename( WCR_FILE ) );
             add_action( 'admin_notices', function () {
-                echo '<div class="notice notice-error"><p><strong>WhatsApp Marketing</strong> was deactivated because it requires WooCommerce. Activate WooCommerce, then activate WhatsApp Marketing again.</p></div>';
+                echo '<div class="notice notice-error"><p><strong>Customer Campaigns</strong> was deactivated because it requires WooCommerce. Activate WooCommerce, then activate Customer Campaigns again.</p></div>';
             } );
         } );
         return;

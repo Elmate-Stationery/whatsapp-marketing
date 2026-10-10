@@ -61,7 +61,7 @@ class WCR_Customers {
         self::$queue = array();
         foreach ( $ids as $id ) {
             try { self::sync_order_id( $id ); }
-            catch ( Throwable $e ) { error_log( sprintf( 'WhatsApp Marketing: could not sync order %d: %s', $id, $e->getMessage() ) ); }
+            catch ( Throwable $e ) { error_log( sprintf( 'Customer Campaigns: could not sync order %d: %s', $id, $e->getMessage() ) ); }
         }
     }
     public static function sync_order_id( $order_id ) {
@@ -309,7 +309,7 @@ class WCR_Customers {
         $orders = wc_get_orders( array( 'type' => 'shop_order', 'status' => array_keys( wc_get_order_statuses() ), 'limit' => self::BATCH, 'paged' => (int) $state['page'], 'orderby' => 'ID', 'order' => 'ASC' ) );
         foreach ( $orders as $order ) {
             try { self::sync_order( $order, false ); }
-            catch ( Throwable $e ) { error_log( sprintf( 'WhatsApp Marketing: could not read order %d: %s', $order->get_id(), $e->getMessage() ) ); }
+            catch ( Throwable $e ) { error_log( sprintf( 'Customer Campaigns: could not read order %d: %s', $order->get_id(), $e->getMessage() ) ); }
         }
         $state['processed'] += count( $orders );
         $state['page']++;
